@@ -9,8 +9,7 @@ struct RootTabView: View {
                 ChatView()
             }
             Tab("Feed", systemImage: "newspaper") {
-                PlaceholderView(title: "Feed", systemImage: "newspaper",
-                                message: "Updates from Steward will appear here.")
+                FeedView()
             }
             Tab("Insights", systemImage: "lightbulb") {
                 PlaceholderView(title: "Insights", systemImage: "lightbulb",

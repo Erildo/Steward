@@ -24,6 +24,8 @@ public struct OpenAICompatibleClient: ModelClient {
     public func complete(system: String, messages: [ModelMessage], tools: [ToolSpec]) async throws -> AssistantTurn {
         var request = URLRequest(url: baseURL.appending(path: "chat/completions"))
         request.httpMethod = "POST"
+        // Web search plus writing can take well over the default minute.
+        request.timeoutInterval = 180
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let apiKey { request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
         request.httpBody = try JSONEncoder().encode(Request(model: model, system: system, messages: messages, tools: tools))
@@ -49,12 +51,13 @@ public struct OpenAICompatibleClient: ModelClient {
     private struct Request: Encodable {
         let model: String
         let messages: [WireMessage]
-        let tools: [WireTool]
+        /// Left out when empty: some providers reject an empty tool list.
+        let tools: [WireTool]?
 
         init(model: String, system: String, messages: [ModelMessage], tools: [ToolSpec]) {
             self.model = model
             self.messages = [WireMessage(role: "system", content: system)] + messages.map(WireMessage.init)
-            self.tools = tools.map { WireTool(function: .init(name: $0.name, description: $0.description, parameters: $0.parameters)) }
+            self.tools = tools.isEmpty ? nil : tools.map { WireTool(function: .init(name: $0.name, description: $0.description, parameters: $0.parameters)) }
         }
     }
 
