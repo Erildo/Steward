@@ -1,0 +1,31 @@
+# Playbook: cancel an auto-renewing online subscription for a California resident.
+# Status: draft. Needs review by someone who knows California consumer law.
+id: cancel/us-ca/online-subscription
+version: 0.1.0
+errand: cancel
+country: US-CA
+applies_to: [online-subscription]
+review: unreviewed
+record: {runs: 0, confirmed: 0}
+
+steps:
+  - Email support with the account email and plan, asking to turn off auto-renewal now.
+  - Ask for written confirmation that auto-renewal is off and no further charges will be taken.
+  - Decline retention offers and downgrades in one sentence.
+  - If no reply within 5 days, follow up.
+
+pushback:
+  - claim: "Cancellations are only handled by phone."
+    answer: >
+      California's automatic renewal law (Business and Professions Code
+      section 17602) requires that a consumer who accepted an automatic renewal
+      online can cancel online, without having to call. State that the customer
+      lives in California and signed up online, and ask them to process the
+      cancellation from this email.
+  - claim: "You must cancel through the website settings."
+    answer: >
+      Ask them to process the written request anyway and confirm in writing;
+      tell the owner where the online cancel option is as a fallback.
+
+never:
+  - Agree to a phone call on the owner's behalf.

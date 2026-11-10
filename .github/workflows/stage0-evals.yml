@@ -1,0 +1,85 @@
+# Re-tests Stage 0 arms whenever something that shapes their behaviour changes
+# (a model in arms.yaml, harness code, scenarios, playbooks, dependencies), then
+# commits the updated public results to harness/results/.
+#
+# Needs the repository secret OPENROUTER_API_KEY. Without it the job skips.
+name: Stage 0 evals
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "harness/arms.yaml"
+      - "harness/src/**"
+      - "harness/scenarios/**"
+      - "harness/playbooks/**"
+      - "harness/uv.lock"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Re-test every arm, even ones that are up to date"
+        type: boolean
+        default: false
+
+concurrency:
+  group: stage0-evals
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: harness
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --locked
+
+      - name: Which arms are stale
+        run: uv run stage0 status
+
+      - name: Run stale arms
+        id: run
+        if: env.OPENROUTER_API_KEY != ''
+        run: |
+          set +e
+          uv run stage0 run --display plain ${{ inputs.force && '--force' || '' }}
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Skip notice
+        if: env.OPENROUTER_API_KEY == ''
+        run: echo "::notice::OPENROUTER_API_KEY is not set, so no evals ran."
+
+      - name: Keep raw logs for 30 days
+        if: steps.run.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage0-logs-${{ github.run_id }}
+          path: harness/logs/runs/
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Commit results
+        if: steps.run.outcome == 'success'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results/
+          if git diff --cached --quiet; then
+            echo "No new results."
+          else
+            git commit -m "Stage 0 results for ${GITHUB_SHA::7}"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
+
+      - name: Fail if an eval errored
+        if: steps.run.outputs.exit != '' && steps.run.outputs.exit != '0'
+        run: exit 1

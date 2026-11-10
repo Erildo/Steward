@@ -1,6 +1,8 @@
 # Planning docs stay local. Only the README is public.
 *.md
 !/README.md
+# Stage 0 results are public too.
+!/harness/results/RESULTS.md
 
 # Design tool working files (mocks, screenshots, logs)
 .impeccable/

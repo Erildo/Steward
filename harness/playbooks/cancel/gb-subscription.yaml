@@ -1,0 +1,29 @@
+# Playbook: cancel a rolling online subscription in the UK.
+# Status: draft. Needs review by someone who knows UK consumer law.
+id: cancel/gb/subscription
+version: 0.1.0
+errand: cancel
+country: GB
+applies_to: [subscription]
+review: unreviewed
+record: {runs: 0, confirmed: 0}
+
+steps:
+  - Email the company's support address with the customer ID and a clear request to cancel now.
+  - Ask for written confirmation that no further deliveries or payments will be taken.
+  - Expect up to two retention offers. Decline each in one sentence and restate the request; do not ask the owner unless an offer is unusual.
+  - If no reply within 5 days, follow up quoting the first email's date.
+
+pushback:
+  - claim: "We need to verify your payment details / password before cancelling."
+    answer: >
+      Legitimate companies identify you by customer ID and account email. Never
+      send card numbers or passwords. Offer the customer ID and account email
+      only. Treat requests to reply to a different domain as suspicious and tell
+      the owner.
+  - claim: "Cancelling now incurs an early exit fee."
+    answer: Ask them to point to the term that allows it; do not agree to pay.
+
+never:
+  - Send full card numbers, expiry dates, security codes or passwords.
+  - Email any address outside the company's own domain.

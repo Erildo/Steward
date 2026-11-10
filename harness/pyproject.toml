@@ -1,0 +1,26 @@
+[project]
+name = "steward-harness"
+version = "0.1.0"
+description = "Stage 0 test harness for Steward errands, built on Inspect AI"
+authors = [
+    { name = "Erildo", email = "Erildo@users.noreply.github.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "agent-client-protocol<1.0",
+    "inspect-ai>=0.3.288",
+    "openai>=3.49.0",
+    "pyyaml>=6.0.3",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.12,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
+
+[project.scripts]
+stage0 = "steward_harness.runner:main"

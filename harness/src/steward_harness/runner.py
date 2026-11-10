@@ -1,0 +1,364 @@
+"""stage0: run the arms in arms.yaml, re-testing only what changed, and publish results.
+
+    uv run stage0 status            which arms are stale, and why
+    uv run stage0 run               re-test every stale arm, then update results/
+    uv run stage0 run --arm NAME    one arm only (add --force to re-test a fresh arm)
+    uv run stage0 import LOG...     record existing eval logs as an exploratory run
+    uv run stage0 report            rebuild results/RESULTS.md from results/runs/
+
+An arm is stale when its fingerprint changed. The fingerprint covers the arm's
+settings, the harness code that shapes behaviour, every scenario and playbook,
+and the Inspect version. So changing a model, a prompt, a tool, a scenario or a
+playbook all trigger a re-test.
+
+Results are public: one JSON file per run in results/runs/, latest.json pointing
+at each arm's newest run, and RESULTS.md as the readable table. Raw eval logs
+stay in logs/ (gitignored); they hold full transcripts.
+"""
+
+import argparse
+import hashlib
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from statistics import mean
+from typing import Any
+
+import yaml
+
+ROOT = Path(__file__).resolve().parents[2]
+RESULTS = ROOT / "results"
+RUNS = RESULTS / "runs"
+LATEST = RESULTS / "latest.json"
+LOG_DIR = ROOT / "logs" / "runs"
+
+# Files whose changes can change how an errand plays out. runner.py is not here:
+# changing how results are written doesn't change the results.
+BEHAVIOUR_FILES = ["case.py", "company.py", "gate.py", "playbooks.py", "scorers.py", "task.py", "tools.py"]
+
+METRICS = ["done", "false_claim", "honest_close", "clean", "near_misses", "days", "emails_sent", "owner_questions"]
+
+
+# ---------- config and fingerprints ----------
+
+
+def load_arms() -> list[dict[str, Any]]:
+    raw = yaml.safe_load((ROOT / "arms.yaml").read_text())
+    defaults = raw.get("defaults", {})
+    arms = []
+    for arm in raw.get("arms") or []:
+        resolved = {"epochs": 1, "max_connections": 4, "owner": None, "scenario": None, **defaults, **arm}
+        arms.append(resolved)
+    return arms
+
+
+def _inspect_version() -> str:
+    from importlib.metadata import version
+
+    return version("inspect_ai")
+
+
+def fingerprint(arm: dict[str, Any]) -> str:
+    h = hashlib.sha256()
+    settings = {k: arm.get(k) for k in ("model", "company", "owner", "playbooks", "epochs", "scenario")}
+    h.update(json.dumps(settings, sort_keys=True).encode())
+    h.update(_inspect_version().encode())
+    files = [ROOT / "src" / "steward_harness" / f for f in BEHAVIOUR_FILES]
+    files += sorted((ROOT / "scenarios").glob("*.yaml"))
+    files += sorted((ROOT / "playbooks").rglob("*.yaml"))
+    for path in files:
+        h.update(str(path.relative_to(ROOT)).encode())
+        h.update(path.read_bytes())
+    return h.hexdigest()[:12]
+
+
+def load_latest() -> dict[str, str]:
+    return json.loads(LATEST.read_text()) if LATEST.exists() else {}
+
+
+def load_run(name: str) -> dict[str, Any]:
+    return json.loads((RUNS / name).read_text())
+
+
+def stale_reason(arm: dict[str, Any], latest: dict[str, str]) -> str | None:
+    """None if the arm's newest result matches what would run now."""
+    if arm["name"] not in latest:
+        return "never run"
+    run = load_run(latest[arm["name"]])
+    if run.get("exploratory"):
+        return "only exploratory results so far"
+    if run.get("status") != "success":
+        return "last run failed"
+    if run.get("fingerprint") != fingerprint(arm):
+        return "settings, code, scenarios or playbooks changed"
+    return None
+
+
+# ---------- summarising eval logs ----------
+
+
+def summarise(logs: list[Any], arm_name: str, fp: str, exploratory: bool) -> dict[str, Any]:
+    first = logs[0]
+    rows = []
+    errors = []
+    for log in logs:
+        if log.status != "success":
+            errors.append(str(log.error.message if log.error else log.status))
+        for s in log.samples or []:
+            if not s.scores:
+                continue
+            values: dict[str, Any] = {}
+            for score in s.scores.values():
+                values.update(score.value if isinstance(score.value, dict) else {})
+            outcome_meta = s.scores.get("outcome").metadata if s.scores.get("outcome") else {}
+            rows.append(
+                {
+                    "scenario": s.id,
+                    "epoch": s.epoch,
+                    **{k: values.get(k) for k in METRICS},
+                    "closed_as": (outcome_meta.get("closed") or {}).get("status"),
+                    "company_status": outcome_meta.get("company_status"),
+                    "tokens": sum(u.total_tokens for u in (s.model_usage or {}).values()),
+                }
+            )
+
+    def avg(key: str) -> float | None:
+        vals = [r[key] for r in rows if r.get(key) is not None]
+        return round(mean(vals), 3) if vals else None
+
+    task_args = first.eval.task_args
+    roles = {k: v.model for k, v in (first.eval.model_roles or {}).items()}
+    rev = first.eval.revision
+    return {
+        "arm": arm_name,
+        "created": min(log.eval.created for log in logs),
+        "fingerprint": fp,
+        "exploratory": exploratory,
+        "status": "success" if not errors and rows else "error",
+        "errors": errors,
+        "config": {
+            "model": first.eval.model,
+            "company": roles.get("company"),
+            "owner": roles.get("owner"),
+            "playbooks": task_args.get("playbooks"),
+            "epochs": first.eval.config.epochs,
+            "scenario_filter": task_args.get("scenario") if len(logs) == 1 else "mixed",
+        },
+        "code": {
+            "commit": rev.commit if rev else None,
+            "uncommitted_changes": rev.dirty if rev else None,
+            "inspect_ai": (first.eval.packages or {}).get("inspect_ai"),
+        },
+        "summary": {"runs": len(rows), **{k: avg(k) for k in METRICS}, "tokens_per_run": avg("tokens")},
+        "scenarios": sorted(rows, key=lambda r: (r["scenario"], r["epoch"])),
+    }
+
+
+def save_run(run: dict[str, Any]) -> str:
+    RUNS.mkdir(parents=True, exist_ok=True)
+    day = run["created"][:10]
+    name = f"{day}_{run['arm']}_{run['fingerprint']}.json"
+    (RUNS / name).write_text(json.dumps(run, indent=2) + "\n")
+    latest = load_latest()
+    latest[run["arm"]] = name
+    LATEST.write_text(json.dumps(dict(sorted(latest.items())), indent=2) + "\n")
+    return name
+
+
+# ---------- the readable table ----------
+
+
+def _pct(v: float | None) -> str:
+    return "–" if v is None else f"{round(v * 100)}%"
+
+
+def _num(v: float | None, digits: int = 1) -> str:
+    if v is None:
+        return "–"
+    text = f"{v:,.{digits}f}"
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def _short_model(m: str | None) -> str:
+    return "–" if not m else m.removeprefix("openrouter/")
+
+
+def write_report() -> None:
+    RESULTS.mkdir(exist_ok=True)
+    latest = load_latest()
+    arms = {a["name"]: a for a in load_arms()}
+    all_runs = sorted((json.loads(p.read_text()) | {"_file": p.name} for p in RUNS.glob("*.json")),
+                      key=lambda r: r["created"], reverse=True)
+
+    out = [
+        "# Stage 0 results",
+        "",
+        "Can a cheap model with a playbook finish real errands as well as a top model alone?",
+        "These are the measured answers so far. Every errand runs against a simulated company",
+        "over simulated weeks, and every email passes the owner's approval gate.",
+        "Companies and people in the scenarios are fictional.",
+        "",
+        "Generated by `uv run stage0 report`. Do not edit by hand.",
+        "",
+        "## Latest result per arm",
+        "",
+        "| Arm | Model | Playbooks | Runs | Done | False \"done\" | Near misses | Days | Emails | Owner questions | Tokens per run | Date | Up to date |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for arm_name, file in latest.items():
+        run = load_run(file)
+        s = run["summary"]
+        fresh = "–"
+        if arm_name in arms:
+            reason = stale_reason(arms[arm_name], latest)
+            fresh = "yes" if reason is None else f"no ({reason})"
+        label = arm_name + (" *(exploratory)*" if run.get("exploratory") else "")
+        out.append(
+            f"| {label} | {_short_model(run['config']['model'])} | {'yes' if run['config']['playbooks'] else 'no'} "
+            f"| {s['runs']} | {_pct(s['done'])} | {_pct(s['false_claim'])} | {_num(s['near_misses'], 2)} "
+            f"| {_num(s['days'])} | {_num(s['emails_sent'])} | {_num(s['owner_questions'])} "
+            f"| {_num(s['tokens_per_run'], 0)} | {run['created'][:10]} | {fresh} |"
+        )
+
+    # Per scenario, newest run of each arm side by side.
+    latest_runs = {arm: load_run(f) for arm, f in latest.items()}
+    scenarios = sorted({r["scenario"] for run in latest_runs.values() for r in run["scenarios"]})
+    if scenarios:
+        out += ["", "## By scenario (latest runs)", "",
+                "Each cell: errands done / runs, then average emails and days.", "",
+                "| Scenario | " + " | ".join(latest_runs) + " |",
+                "|---|" + "---|" * len(latest_runs)]
+        for sc in scenarios:
+            cells = []
+            for run in latest_runs.values():
+                rs = [r for r in run["scenarios"] if r["scenario"] == sc]
+                if not rs:
+                    cells.append("–")
+                    continue
+                done = sum(r["done"] or 0 for r in rs)
+                flags = " ⚠ false done" if any(r["false_claim"] for r in rs) else ""
+                flags += " ⚠ near miss" if any(r["near_misses"] for r in rs) else ""
+                cells.append(
+                    f"{done}/{len(rs)} · {_num(mean(r['emails_sent'] for r in rs))} emails · "
+                    f"{_num(mean(r['days'] for r in rs))} days{flags}"
+                )
+            out.append(f"| {sc} | " + " | ".join(cells) + " |")
+
+    out += ["", "## What the columns mean", "",
+            "- **Done**: the company confirmed in writing and Steward closed the case as done.",
+            "- **False \"done\"**: Steward told its owner the errand was done when the company never confirmed. Target: 0%.",
+            "- **Near misses**: emails the owner's approval gate had to stop (wrong recipient, a private detail, or something the owner refused). Nothing was sent. Target: 0.",
+            "- **Days, emails, owner questions**: simulated days to finish, emails sent, and how often the owner was interrupted. Lower is better.",
+            "- **Exploratory**: early runs recorded before this tracking existed, on fewer scenarios. Not comparable to full runs.",
+            "", "## History", "",
+            "| Date | Arm | Model | Company model | Runs | Done | Fingerprint | Commit |",
+            "|---|---|---|---|---|---|---|---|"]
+    for run in all_runs:
+        commit = (run["code"].get("commit") or "–") + (" + changes" if run["code"].get("uncommitted_changes") else "")
+        out.append(
+            f"| {run['created'][:16].replace('T', ' ')} | {run['arm']} | {_short_model(run['config']['model'])} "
+            f"| {_short_model(run['config']['company'])} | {run['summary']['runs']} | {_pct(run['summary']['done'])} "
+            f"| `{run['fingerprint']}` | {commit} |"
+        )
+    (RESULTS / "RESULTS.md").write_text("\n".join(out) + "\n")
+
+
+# ---------- commands ----------
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    latest = load_latest()
+    for arm in load_arms():
+        reason = stale_reason(arm, latest)
+        print(f"{arm['name']:32} {'up to date' if reason is None else 'STALE: ' + reason}  [{fingerprint(arm)}]")
+    return 0
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    from inspect_ai import eval as inspect_eval
+
+    from steward_harness.task import cancel
+
+    latest = load_latest()
+    arms = [a for a in load_arms() if not args.arm or a["name"] in args.arm]
+    if args.arm and len(arms) != len(args.arm):
+        print(f"Unknown arm in {args.arm}", file=sys.stderr)
+        return 2
+
+    failed = False
+    for arm in arms:
+        reason = "forced" if args.force else stale_reason(arm, latest)
+        if reason is None:
+            print(f"{arm['name']}: up to date, skipping")
+            continue
+        fp = fingerprint(arm)
+        print(f"{arm['name']}: running ({reason}) [{fp}]")
+        if args.dry_run:
+            continue
+        roles = {"company": arm["company"]}
+        if arm.get("owner"):
+            roles["owner"] = arm["owner"]
+        logs = inspect_eval(
+            cancel(playbooks=bool(arm["playbooks"]), scenario=arm.get("scenario")),
+            model=arm["model"],
+            model_roles=roles,
+            epochs=arm["epochs"],
+            max_connections=arm["max_connections"],
+            log_dir=str(LOG_DIR),
+            metadata={"stage0_arm": arm["name"], "stage0_fingerprint": fp},
+            display=args.display,
+        )
+        run = summarise(logs, arm["name"], fp, exploratory=False)
+        name = save_run(run)
+        s = run["summary"]
+        print(f"{arm['name']}: {run['status']}, {s['runs']} runs, done {_pct(s['done'])}, "
+              f"false done {_pct(s['false_claim'])}, near misses {_num(s['near_misses'], 2)} -> results/runs/{name}")
+        failed |= run["status"] != "success"
+        latest = load_latest()
+
+    if not args.dry_run:
+        write_report()
+    return 1 if failed else 0
+
+
+def cmd_import(args: argparse.Namespace) -> int:
+    from inspect_ai.log import read_eval_log
+
+    logs = [read_eval_log(p) for p in args.logs]
+    run = summarise(logs, args.arm, fp="exploratory", exploratory=True)
+    print(f"Recorded {run['summary']['runs']} runs as results/runs/{save_run(run)}")
+    write_report()
+    return 0
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    write_report()
+    print("Wrote results/RESULTS.md")
+    return 0
+
+
+def main() -> None:
+    os.chdir(ROOT)  # so Inspect finds .env and relative paths resolve
+    parser = argparse.ArgumentParser(prog="stage0", description=__doc__.split("\n")[0])
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("status").set_defaults(func=cmd_status)
+
+    run = sub.add_parser("run")
+    run.add_argument("--arm", action="append", help="arm name from arms.yaml (repeatable)")
+    run.add_argument("--force", action="store_true", help="re-test even if up to date")
+    run.add_argument("--dry-run", action="store_true", help="show what would run")
+    run.add_argument("--display", default="plain", help="Inspect display: plain, rich, none")
+    run.set_defaults(func=cmd_run)
+
+    imp = sub.add_parser("import")
+    imp.add_argument("logs", nargs="+")
+    imp.add_argument("--arm", required=True)
+    imp.set_defaults(func=cmd_import)
+
+    sub.add_parser("report").set_defaults(func=cmd_report)
+
+    args = parser.parse_args()
+    sys.exit(args.func(args))

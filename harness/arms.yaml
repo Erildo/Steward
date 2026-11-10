@@ -1,0 +1,33 @@
+# The configurations we measure. Each arm is one way of running Steward.
+#
+# Change anything here (a model, the company model, epochs), or change the
+# harness code, scenarios or playbooks, and the arm becomes stale. Then
+# `uv run stage0 run` re-tests only the stale arms, and the GitHub workflow
+# does the same on every push to main. Results land in results/ and are public.
+#
+# Free OpenRouter models allow about 50 requests a day without credits (about
+# 1,000 with $10 of credit). One errand run takes roughly 5 to 15 calls.
+
+defaults:
+  # The simulated company. Keep it the same across arms, or comparisons are
+  # meaningless. Ideally it is not one of the models being tested.
+  company: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
+  epochs: 1
+  max_connections: 2
+
+arms:
+  - name: nemotron-ultra-playbook
+    model: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
+    playbooks: true
+
+  - name: nemotron-ultra-alone
+    model: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
+    playbooks: false
+
+  # Paid arms, the real Stage 0 question. Need OpenRouter credits.
+  # - name: haiku-playbook
+  #   model: openrouter/anthropic/claude-haiku-5-5
+  #   playbooks: true
+  # - name: opus-alone
+  #   model: openrouter/anthropic/claude-opus-5-5
+  #   playbooks: false

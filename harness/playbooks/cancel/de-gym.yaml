@@ -1,0 +1,35 @@
+# Playbook: cancel a gym membership in Germany.
+# Status: draft. Legal points need review by someone who knows German consumer law.
+id: cancel/de/gym
+version: 0.1.0
+errand: cancel
+country: DE
+applies_to: [gym]
+review: unreviewed
+record: {runs: 0, confirmed: 0}
+
+steps:
+  - Write the cancellation (Kündigung) in writing, by email to the gym's contact address. Write in German.
+  - Include the member's full name, member number and postal city, and the words "Ich kündige meinen Mitgliedsvertrag zum nächstmöglichen Zeitpunkt".
+  - Ask for written confirmation (Kündigungsbestätigung) stating the exact end date.
+  - Decline any retention offer (discount, free months, pause) in one sentence, without discussion.
+  - If no reply within 7 days, send a short follow-up that quotes the first email's date.
+
+pushback:
+  - claim: "The contract renewed automatically for another 12 months."
+    answer: >
+      For contracts made after 1 March 2022, a contract that continues after its
+      initial term runs on indefinitely and can be ended with at most one month's
+      notice (§ 309 Nr. 9 BGB). Say this plainly and ask them to confirm the end
+      date one month after the notice.
+  - claim: "Cancellation is only possible in person, by post or by phone."
+    answer: >
+      Text form (email) is enough for a Kündigung unless the contract validly
+      requires more; businesses offering contracts online must also provide a
+      cancellation button (§ 312k BGB). Ask them to process the email notice.
+  - claim: "There is a processing or cancellation fee."
+    answer: Refuse; ask them to name the contract clause. Do not agree to pay.
+
+never:
+  - Send bank details (IBAN) or ID documents by email.
+  - Agree to a pause or discount.
