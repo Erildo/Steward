@@ -19,3 +19,7 @@ build/
 .env.*
 *.p8
 *.mobileprovision
+
+# Swift package build output
+.build/
+.swiftpm/

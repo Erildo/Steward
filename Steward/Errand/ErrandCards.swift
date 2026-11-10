@@ -75,7 +75,9 @@ private struct ProgressCard: View {
             HStack(alignment: .firstTextBaseline) {
                 Text(errand.title).font(.headline).foregroundStyle(Palette.ink)
                 Spacer()
-                Text("Demo").font(.caption).foregroundStyle(Palette.muted)
+                if let label = errand.label {
+                    Text(label).font(.caption).foregroundStyle(Palette.muted)
+                }
             }
             StepList(steps: errand.steps)
         }
@@ -183,10 +185,12 @@ private struct ApprovalCard: View {
                 .tint(Palette.ink)
             }
             .controlSize(.large)
-            Text("Demo: nothing is really sent.")
-                .font(.caption)
-                .foregroundStyle(Palette.muted)
-                .frame(maxWidth: .infinity)
+            if let label = errand.label {
+                Text("\(label): nothing is really sent.")
+                    .font(.caption)
+                    .foregroundStyle(Palette.muted)
+                    .frame(maxWidth: .infinity)
+            }
         case .approved:
             Label("You approved this", systemImage: "checkmark.circle.fill")
                 .font(.subheadline.weight(.semibold))

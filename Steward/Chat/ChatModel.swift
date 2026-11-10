@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import StewardCore
 
 struct ChatMessage: Identifiable, Equatable {
     enum Author { case owner, steward }
@@ -56,11 +57,16 @@ final class ChatModel {
     private let service: ChatService
     private let pace: Duration = .seconds(1.8)
     private var runTask: Task<Void, Never>?
+    /// Runs real errands through the agent. `nil` keeps chat on the scripted demo.
+    private let runner: CaseRunner?
+    /// The case whose question the owner's next message answers.
+    private var questionCaseID: UUID?
 
-    init(messages: [ChatMessage], showsSampleLabel: Bool, service: ChatService) {
+    init(messages: [ChatMessage], showsSampleLabel: Bool, service: ChatService, runner: CaseRunner? = nil) {
         self.messages = messages
         self.showsSampleLabel = showsSampleLabel
         self.service = service
+        self.runner = runner
     }
 
     var activeErrand: Errand? { activeErrandID.flatMap { errands[$0] } }
@@ -81,9 +87,19 @@ final class ChatModel {
     func send(_ raw: String) {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        if let id = questionCaseID, !isStewardWorking {
+            messages.append(ChatMessage(author: .owner, text: text))
+            questionCaseID = nil
+            errands[id]?.phase = .running
+            if let index = errands[id]?.steps.firstIndex(where: { $0.state == .waiting }) {
+                setStep(id, index, .active)
+            }
+            runTask = Task { await advance(id) { try await $0.wake(id, with: .answer(text)) } }
+            return
+        }
         if text.lowercased().contains("cancel"), activeErrandID == nil {
             messages.append(ChatMessage(author: .owner, text: text))
-            startDemoErrand()
+            if runner != nil { startAgentErrand() } else { startDemoErrand() }
             return
         }
         let message = ChatMessage(author: .owner, text: text, status: .sending)
@@ -109,6 +125,7 @@ final class ChatModel {
         messages = []
         errands = [:]
         activeErrandID = nil
+        questionCaseID = nil
         showsDone = false
         showsSampleLabel = false
         isStewardWorking = false
@@ -120,12 +137,27 @@ final class ChatModel {
         guard errands[id]?.approval == .pending else { return }
         errands[id]?.approval = .approved
         errands[id]?.phase = .running
+        if let file = runner?.cases[id], case .needsApproval(_, let draft) = file.state {
+            let body = errands[id]?.messageBody
+            let edited = body == draft.body ? nil : body
+            setStage(id, 1, .active)
+            runTask = Task { await advance(id) { try await $0.wake(id, with: .approval(approved: true, editedBody: edited)) } }
+            return
+        }
         setStep(id, 3, .active)
         runTask = Task { await finishAfterApproval(id) }
     }
 
     func decline(_ id: UUID) {
         guard errands[id]?.approval == .pending else { return }
+        if runner?.cases[id] != nil {
+            // The agent hears the no and decides what's next; usually it closes.
+            errands[id]?.approval = .declined
+            errands[id]?.phase = .running
+            setStage(id, 1, .active)
+            runTask = Task { await advance(id) { try await $0.wake(id, with: .approval(approved: false, reason: "The owner declined this draft.")) } }
+            return
+        }
         close(id)
         say("Okay, nothing was sent. Your membership stays as it is.")
     }
@@ -133,6 +165,7 @@ final class ChatModel {
     func stopActiveErrand() {
         guard let id = activeErrandID else { return }
         runTask?.cancel()
+        if questionCaseID == id { questionCaseID = nil }
         close(id)
         say("Stopped. Nothing was sent.")
     }
@@ -150,6 +183,121 @@ final class ChatModel {
             }
         }
         activeErrandID = nil
+    }
+
+    // MARK: Agent run
+
+    private func startAgentErrand() {
+        guard let runner else { return }
+        let file = SimulatedErrand.gymCancellation()
+        do {
+            try runner.open(file)
+        } catch {
+            say("I couldn't save this errand on your phone, so I haven't started it.")
+            return
+        }
+        let errand = Errand.agentErrand(id: file.id, title: SimulatedErrand.title, label: runner.isSimulated ? "Simulated" : nil)
+        errands[errand.id] = errand
+        activeErrandID = errand.id
+        showsDone = false
+        setStage(file.id, 0, .active)
+        say("On it. I'll write to \(file.company.name) and show you the email before anything goes out.", attachment: .progress(file.id))
+        runTask = Task { await advance(file.id) { try await $0.wake(file.id, with: .start) } }
+    }
+
+    /// Wakes the agent through `work`, then shows where the case now stands.
+    private func advance(_ id: UUID, _ work: (CaseRunner) async throws -> CaseFile?) async {
+        guard let runner, let before = runner.cases[id] else { return }
+        isStewardWorking = true
+        do {
+            let file = try await work(runner)
+            isStewardWorking = false
+            guard !Task.isCancelled, let file else { return }
+            show(file, newEvents: file.events.dropFirst(before.events.count))
+        } catch {
+            isStewardWorking = false
+            guard !Task.isCancelled else { return }
+            close(id)
+            say("I couldn't finish that step, so I've paused this errand. Nothing more goes out without your OK.")
+        }
+    }
+
+    private func show(_ file: CaseFile, newEvents: ArraySlice<CaseFile.Event>) {
+        let id = file.id
+        if newEvents.contains(where: { $0.kind == "email_in" }) {
+            say("\(file.company.name) replied. Reading it now.")
+        }
+        switch file.state {
+        case .new:
+            break
+        case .needsApproval(_, let draft):
+            errands[id]?.recipient = draft.to
+            errands[id]?.subject = draft.subject
+            errands[id]?.messageBody = draft.body
+            errands[id]?.approval = .pending
+            errands[id]?.phase = .needsYou
+            setStage(id, 1, .waiting)
+            say("Here's exactly what I'll send. Nothing goes until you say yes.", attachment: .approval(id))
+        case .needsAnswer(_, let question):
+            errands[id]?.phase = .needsYou
+            if let index = errands[id]?.steps.firstIndex(where: { $0.state == .active }) {
+                setStep(id, index, .waiting)
+            }
+            questionCaseID = id
+            say(question)
+        case .waitingForReply(_, let until):
+            errands[id]?.phase = .running
+            setStage(id, 2, .active)
+            if newEvents.contains(where: { $0.kind == "email_out" }) {
+                say("Sent to \(file.company.name). I'll watch for their reply and pick it up as soon as it lands.")
+            } else {
+                say("I'm waiting for \(file.company.name) to reply, until \(until.formatted(.dateTime.month(.wide).day())) at the latest.")
+            }
+            if runner?.isSimulated == true {
+                runTask = Task { await collectSimulatedReply(id) }
+            }
+        case .closed:
+            finish(file)
+        }
+    }
+
+    private func finish(_ file: CaseFile) {
+        let id = file.id
+        guard let closure = file.closure, closure.status == .done else {
+            close(id)
+            say(file.closure?.summary ?? "I've stopped this errand.")
+            return
+        }
+        setStage(id, errands[id]?.steps.count ?? 0, .done)
+        errands[id]?.phase = .finished
+        activeErrandID = nil
+        showsDone = true
+        say("Done. \(closure.summary)")
+        if !closure.evidence.isEmpty {
+            say("In their words: \u{201C}\(closure.evidence)\u{201D}")
+        }
+        runTask = Task {
+            try? await Task.sleep(for: .seconds(3))
+            if !Task.isCancelled { showsDone = false }
+        }
+    }
+
+    /// Simulated relay only: the company's reply arrives a moment after sending.
+    private func collectSimulatedReply(_ id: UUID) async {
+        do { try await Task.sleep(for: pace * 2) } catch { return }
+        setStage(id, 3, .active)
+        await advance(id) { try await $0.collectMail(for: id) }
+        if runner?.cases[id]?.inbox.isEmpty == true, case .waitingForReply = runner?.cases[id]?.state {
+            setStage(id, 2, .active)
+        }
+    }
+
+    /// Marks steps before `index` done, `index` as `state`, and the rest not started.
+    private func setStage(_ id: UUID, _ index: Int, _ state: Errand.StepState) {
+        guard let count = errands[id]?.steps.count else { return }
+        for step in 0..<count {
+            setStep(id, step, step < index ? .done : step == index ? state : .pending)
+        }
     }
 
     // MARK: Scripted run
@@ -236,7 +384,7 @@ final class ChatModel {
 }
 
 extension ChatModel {
-    /// Reads `-uiState empty|failed|long|errand` so each state can be launched and checked directly.
+    /// Reads `-uiState empty|failed|long|errand|agent` so each state can be launched and checked directly.
     static func launch() -> ChatModel {
         let state = UserDefaults.standard.string(forKey: "uiState")
         let service = PreviewChatService(fails: state == "failed")
@@ -249,6 +397,11 @@ extension ChatModel {
         case "long":
             let long = ChatMessage(author: .steward, text: String(repeating: "Your gym's terms ask for thirty days' written notice, and the next payment leaves on the fourteenth. ", count: 6))
             return ChatModel(messages: sample() + [long], showsSampleLabel: true, service: service)
+        case "agent":
+            // A real agent run on a sample case, with simulated mail and company.
+            let model = ChatModel(messages: [], showsSampleLabel: false, service: service, runner: .simulated())
+            model.send("Cancel my gym membership.")
+            return model
         case "errand":
             let model = ChatModel(messages: [], showsSampleLabel: false, service: service)
             model.runDemoFromMenu()

@@ -20,14 +20,34 @@ struct Errand: Identifiable {
         var state: StepState = .pending
     }
 
-    let id = UUID()
+    var id = UUID()
     let title: String
     var steps: [Step]
     var phase: Phase = .running
     var approval: Approval = .notAsked
-    let recipient: String
-    let subject: String
+    var recipient: String
+    var subject: String
     var messageBody: String
+    /// Shown on the cards while nothing is really sent: "Demo" or "Simulated".
+    var label: String? = "Demo"
+
+    /// A real errand run by the agent. The draft fields fill in when it asks for approval.
+    static func agentErrand(id: UUID, title: String, label: String?) -> Errand {
+        Errand(
+            id: id,
+            title: title,
+            steps: [
+                Step(title: "Write the email", activeTitle: "Writing the email"),
+                Step(title: "Send it, with your OK", activeTitle: "Sending the email"),
+                Step(title: "Wait for their reply", activeTitle: "Waiting for their reply"),
+                Step(title: "Get it confirmed in writing", activeTitle: "Reading their reply"),
+            ],
+            recipient: "",
+            subject: "",
+            messageBody: "",
+            label: label
+        )
+    }
 
     static func demoGymCancellation() -> Errand {
         Errand(

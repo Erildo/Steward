@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		B10000000000000000000020 /* StewardWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		C10000000000000000000001 /* StewardCore in Frameworks */ = {isa = PBXBuildFile; productRef = C10000000000000000000003 /* StewardCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -30,7 +31,7 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		A10000000000000000000003 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A10000000000000000000003 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (C10000000000000000000001 /* StewardCore in Frameworks */); runOnlyForDeploymentPostprocessing = 0; };
 		B10000000000000000000003 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
 
@@ -48,7 +49,7 @@
 			dependencies = (B10000000000000000000024);
 			fileSystemSynchronizedGroups = (A10000000000000000000002, B10000000000000000000023);
 			name = Steward;
-			packageProductDependencies = ();
+			packageProductDependencies = (C10000000000000000000003 /* StewardCore */);
 			productName = Steward;
 			productReference = A10000000000000000000001;
 			productType = "com.apple.product-type.application";
@@ -78,6 +79,7 @@
 			knownRegions = (en, Base);
 			mainGroup = A10000000000000000000004;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (C10000000000000000000002 /* XCLocalSwiftPackageReference "StewardCore" */);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A10000000000000000000005;
 			projectDirPath = "";
@@ -126,6 +128,14 @@
 		A1000000000000000000000B = {isa = XCConfigurationList; buildConfigurations = (A1000000000000000000000E, A1000000000000000000000F); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		B1000000000000000000000B = {isa = XCConfigurationList; buildConfigurations = (B1000000000000000000000E, B1000000000000000000000F); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		C10000000000000000000002 /* XCLocalSwiftPackageReference "StewardCore" */ = {isa = XCLocalSwiftPackageReference; relativePath = StewardCore; };
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		C10000000000000000000003 /* StewardCore */ = {isa = XCSwiftPackageProductDependency; productName = StewardCore; };
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A10000000000000000000009 /* Project object */;
 }
