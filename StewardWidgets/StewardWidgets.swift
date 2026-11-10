@@ -28,18 +28,22 @@ private struct StatusBadge: View {
 
     private var symbol: String {
         switch phase {
-        case .working: "house.fill"
+        case .working: "cat.fill" // unused: the working badge draws StewardAvatar
         case .needsYou: "hand.raised.fill"
         case .done: "checkmark"
         }
     }
 
     var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: size * 0.48, weight: .semibold))
-            .foregroundStyle(Palette.onOrange)
-            .frame(width: size, height: size)
-            .background(Palette.orange, in: .circle)
+        if phase == .working {
+            StewardAvatar(size: size, blinks: false)
+        } else {
+            Image(systemName: symbol)
+                .font(.system(size: size * 0.48, weight: .semibold))
+                .foregroundStyle(Palette.onOrange)
+                .frame(width: size, height: size)
+                .background(Palette.orange, in: .circle)
+        }
     }
 }
 
