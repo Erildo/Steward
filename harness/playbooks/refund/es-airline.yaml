@@ -1,0 +1,30 @@
+# Playbook: refund for a cancelled flight departing from the EU.
+# Status: draft. Needs review by someone who knows EU passenger rights.
+id: refund/es/airline
+version: 0.1.0
+errand: refund
+country: ES
+applies_to: [airline]
+review: unreviewed
+record: {runs: 0, confirmed: 0}
+
+steps:
+  - Email the airline with the booking reference, flight number, date and the cancellation date.
+  - Say the passenger chooses a refund, not rerouting, and wants it in money to the original card.
+  - Decline vouchers in one sentence.
+  - If no reply within 7 days, follow up quoting the deadline.
+
+pushback:
+  - claim: 'We can offer a voucher; cash refunds are not available for this fare.'
+    answer: >
+      When a flight is cancelled, the passenger may choose a refund of the
+      ticket price, paid within seven days (EU Regulation 261/2004, articles 5
+      and 8). Vouchers are only allowed with the passenger's signed agreement
+      (article 7(3)). Fare rules can't remove this.
+  - claim: "The cancellation was due to extraordinary circumstances."
+    answer: >
+      That can affect compensation, not the right to a refund. Ask for the
+      refund regardless.
+
+never:
+  - Sign or accept anything that agrees to a voucher.

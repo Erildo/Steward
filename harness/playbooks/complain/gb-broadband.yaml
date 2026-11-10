@@ -1,0 +1,27 @@
+# Playbook: complaint about a broadband outage in the UK.
+# Status: draft. Needs review by someone who knows UK telecoms rules.
+id: complain/gb/broadband
+version: 0.1.0
+errand: complain
+country: GB
+applies_to: [broadband]
+review: unreviewed
+record: {runs: 0, confirmed: 0}
+
+steps:
+  - Email the provider's complaints address with the account number and the fault reference.
+  - State the date the loss of service was reported and the date it was fixed.
+  - Ask for compensation under Ofcom's automatic compensation scheme for each day the fault stayed unfixed after two full working days.
+  - Decline a goodwill gesture as full settlement in one sentence.
+  - If the complaint isn't resolved after eight weeks, the owner can go to the provider's ADR scheme; tell them, don't start it without asking.
+
+pushback:
+  - claim: "We can offer a goodwill credit."
+    answer: >
+      Most large UK providers are signed up to Ofcom's voluntary automatic
+      compensation scheme, which pays a set daily amount for a total loss of
+      service not fixed within two full working days. Ask for that instead. Check
+      the provider is a member and the current daily rate.
+
+never:
+  - Agree to a contract extension in exchange for compensation.

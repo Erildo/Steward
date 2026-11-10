@@ -29,7 +29,9 @@ from typing import Any
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-RESULTS = ROOT / "results"
+# Overridable so tests can run the whole pipeline without touching public results.
+ARMS_FILE = Path(os.environ.get("STAGE0_ARMS", ROOT / "arms.yaml"))
+RESULTS = Path(os.environ.get("STAGE0_RESULTS", ROOT / "results"))
 RUNS = RESULTS / "runs"
 LATEST = RESULTS / "latest.json"
 LOG_DIR = ROOT / "logs" / "runs"
@@ -45,11 +47,21 @@ METRICS = ["done", "false_claim", "honest_close", "clean", "near_misses", "days"
 
 
 def load_arms() -> list[dict[str, Any]]:
-    raw = yaml.safe_load((ROOT / "arms.yaml").read_text())
+    from steward_harness.task import ERRANDS
+
+    raw = yaml.safe_load(ARMS_FILE.read_text())
     defaults = raw.get("defaults", {})
     arms = []
     for arm in raw.get("arms") or []:
-        resolved = {"epochs": 1, "max_connections": 4, "owner": None, "scenario": None, **defaults, **arm}
+        resolved = {
+            "epochs": 1,
+            "max_connections": 4,
+            "owner": None,
+            "errands": ERRANDS,
+            "scenarios": None,  # None means every scenario of each errand
+            **defaults,
+            **arm,
+        }
         arms.append(resolved)
     return arms
 
@@ -62,7 +74,7 @@ def _inspect_version() -> str:
 
 def fingerprint(arm: dict[str, Any]) -> str:
     h = hashlib.sha256()
-    settings = {k: arm.get(k) for k in ("model", "company", "owner", "playbooks", "epochs", "scenario")}
+    settings = {k: arm.get(k) for k in ("model", "company", "owner", "playbooks", "epochs", "errands", "scenarios")}
     h.update(json.dumps(settings, sort_keys=True).encode())
     h.update(_inspect_version().encode())
     files = [ROOT / "src" / "steward_harness" / f for f in BEHAVIOUR_FILES]
@@ -115,6 +127,7 @@ def summarise(logs: list[Any], arm_name: str, fp: str, exploratory: bool) -> dic
             outcome_meta = s.scores.get("outcome").metadata if s.scores.get("outcome") else {}
             rows.append(
                 {
+                    "errand": log.eval.task.split("/")[-1],
                     "scenario": s.id,
                     "epoch": s.epoch,
                     **{k: values.get(k) for k in METRICS},
@@ -144,7 +157,7 @@ def summarise(logs: list[Any], arm_name: str, fp: str, exploratory: bool) -> dic
             "owner": roles.get("owner"),
             "playbooks": task_args.get("playbooks"),
             "epochs": first.eval.config.epochs,
-            "scenario_filter": task_args.get("scenario") if len(logs) == 1 else "mixed",
+            "errands": sorted({log.eval.task.split("/")[-1] for log in logs}),
         },
         "code": {
             "commit": rev.commit if rev else None,
@@ -152,7 +165,7 @@ def summarise(logs: list[Any], arm_name: str, fp: str, exploratory: bool) -> dic
             "inspect_ai": (first.eval.packages or {}).get("inspect_ai"),
         },
         "summary": {"runs": len(rows), **{k: avg(k) for k in METRICS}, "tokens_per_run": avg("tokens")},
-        "scenarios": sorted(rows, key=lambda r: (r["scenario"], r["epoch"])),
+        "scenarios": sorted(rows, key=lambda r: (r.get("errand") or "", r["scenario"], r["epoch"])),
     }
 
 
@@ -222,8 +235,22 @@ def write_report() -> None:
             f"| {_num(s['tokens_per_run'], 0)} | {run['created'][:10]} | {fresh} |"
         )
 
-    # Per scenario, newest run of each arm side by side.
     latest_runs = {arm: load_run(f) for arm, f in latest.items()}
+
+    # Per errand: share done, newest run of each arm side by side.
+    errands = sorted({r.get("errand") or "cancel" for run in latest_runs.values() for r in run["scenarios"]})
+    if errands:
+        out += ["", "## By errand (latest runs)", "", "Errands done / runs.", "",
+                "| Errand | " + " | ".join(latest_runs) + " |",
+                "|---|" + "---|" * len(latest_runs)]
+        for errand in errands:
+            cells = []
+            for run in latest_runs.values():
+                rs = [r for r in run["scenarios"] if (r.get("errand") or "cancel") == errand]
+                cells.append(f"{sum(r['done'] or 0 for r in rs)}/{len(rs)}" if rs else "–")
+            out.append(f"| {errand} | " + " | ".join(cells) + " |")
+
+    # Per scenario, newest run of each arm side by side.
     scenarios = sorted({r["scenario"] for run in latest_runs.values() for r in run["scenarios"]})
     if scenarios:
         out += ["", "## By scenario (latest runs)", "",
@@ -279,7 +306,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     from inspect_ai import eval as inspect_eval
 
-    from steward_harness.task import cancel
+    from steward_harness.task import errand_ids, errand_task
 
     latest = load_latest()
     arms = [a for a in load_arms() if not args.arm or a["name"] in args.arm]
@@ -300,8 +327,18 @@ def cmd_run(args: argparse.Namespace) -> int:
         roles = {"company": arm["company"]}
         if arm.get("owner"):
             roles["owner"] = arm["owner"]
+        wanted = set(arm["scenarios"]) if arm.get("scenarios") else None
+        tasks = [
+            errand_task(errand, playbooks=bool(arm["playbooks"]), scenario=arm.get("scenarios"))
+            for errand in arm["errands"]
+            if wanted is None or wanted & set(errand_ids(errand))
+        ]
+        if not tasks:
+            print(f"{arm['name']}: no scenarios match, skipping", file=sys.stderr)
+            failed = True
+            continue
         logs = inspect_eval(
-            cancel(playbooks=bool(arm["playbooks"]), scenario=arm.get("scenario")),
+            tasks,
             model=arm["model"],
             model_roles=roles,
             epochs=arm["epochs"],

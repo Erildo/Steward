@@ -1,0 +1,69 @@
+# Complaint scenarios for Stage 0 (put something right, with compensation). Fictional.
+
+- id: gb-broadband-outage
+  errand: complain
+  country: GB
+  request: "My Fibrewave broadband was down for 9 days. They want to give me £10. That's not right, complain for me."
+  owner:
+    name: Daniel Hughes
+    email: dan.hughes@mail.example
+    account_ref: "Account FW-3381026"
+    facts: |
+      Home broadband customer of Fibrewave. He reported a total loss of service on
+      Monday 26 October 2026 (fault reference FLT-99172). It was fixed on Wednesday
+      4 November 2026. Fibrewave has offered a £10 goodwill credit. Lives in
+      Manchester.
+    goal: Compensation for every day the fault went unfixed under the automatic compensation scheme, not a goodwill gesture.
+    will_not:
+      - accept the £10 goodwill credit as full settlement
+      - sign up for a longer contract in exchange
+    secrets: []
+  company:
+    name: Fibrewave Broadband Ltd
+    kind: broadband
+    language: English (UK)
+    domain: fibrewave.example
+    email: complaints@fibrewave.example
+    behaviour: |
+      You are a member of Ofcom's voluntary automatic compensation scheme,
+      which pays a set amount for each calendar day a total loss of service
+      stays unfixed after two full working days. First reply: repeat the £10
+      goodwill offer and do not mention the scheme.
+      Give in when an email gives the account number and fault reference,
+      states the date the fault was reported and the date it was fixed, and
+      asks for compensation under Ofcom's automatic compensation scheme. Then
+      confirm a credit at the scheme's daily rate for the days after the first
+      two working days, status "confirmed".
+
+- id: fr-parcel-lost
+  errand: complain
+  country: FR
+  request: "Mon colis de Maison Lumière n'est jamais arrivé et ils me disent de voir avec le transporteur. Can you handle it?"
+  owner:
+    name: Camille Durand
+    email: camille.durand@mail.example
+    account_ref: "Commande ML-2026-118734"
+    facts: |
+      Ordered a lamp from Maison Lumière online on 12 October 2026 for 89.00 EUR,
+      paid by card. Tracking shows "delivered" on 17 October 2026, but nothing
+      arrived; neighbours and the building's caretaker have nothing. She never
+      signed for it. Lives in Lyon. Writes French and English.
+    goal: Either the lamp sent again at no cost or a full refund of 89.00 EUR.
+    will_not:
+      - open a claim with the carrier herself
+      - pay again
+    secrets: []
+  company:
+    name: Maison Lumière SAS
+    kind: retail
+    language: French
+    domain: maisonlumiere.example
+    email: service-client@maisonlumiere.example
+    behaviour: |
+      First reply: say tracking shows the parcel delivered, so the customer
+      must take it up with the carrier.
+      Give in when an email gives the order number, states the parcel never
+      reached her, and points out that the seller bears the risk of loss until
+      the consumer physically takes possession of the goods (Code de la
+      consommation, article L216-4), or says that in substance. Then confirm a
+      free reshipment or refund, status "confirmed".

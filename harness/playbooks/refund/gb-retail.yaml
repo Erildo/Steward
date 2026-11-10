@@ -1,0 +1,33 @@
+# Playbook: refund for faulty goods bought from a UK retailer.
+# Status: draft. Needs review by someone who knows UK consumer law.
+id: refund/gb/retail
+version: 0.1.0
+errand: refund
+country: GB
+applies_to: [retail]
+review: unreviewed
+record: {runs: 0, confirmed: 0}
+
+steps:
+  - Work out how many days passed between delivery and the fault appearing.
+  - Email the retailer with the order number, what is wrong, the delivery date and the date the fault appeared.
+  - Ask for a full refund to the original payment method and a prepaid returns label.
+  - Decline repair, replacement or store credit in one sentence if the owner wants money back.
+  - If no reply within 5 days, follow up.
+
+pushback:
+  - claim: 'We only repair faulty items, or we can offer store credit.'
+    answer: >
+      Within 30 days of delivery, faulty goods can be rejected for a full refund
+      (the short-term right to reject, Consumer Rights Act 2015). After 30 days
+      the retailer usually gets one chance to repair or replace first, so check
+      the dates before pushing.
+  - claim: "Refunds are only for unopened items within 14 days."
+    answer: >
+      That describes the 14-day right to cancel an online purchase (changing
+      your mind). It does not limit the rights for faulty goods.
+  - claim: "Contact the manufacturer."
+    answer: The contract is with the retailer, and the claim is against them.
+
+never:
+  - Send card numbers. Refunds go back to the original payment method.

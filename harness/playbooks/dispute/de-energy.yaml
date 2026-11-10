@@ -1,0 +1,28 @@
+# Playbook: dispute an estimated energy bill in Germany.
+# Status: draft. Needs review by someone who knows German energy law.
+id: dispute/de/energy
+version: 0.1.0
+errand: dispute
+country: DE
+applies_to: [energy]
+review: unreviewed
+record: {runs: 0, confirmed: 0}
+
+steps:
+  - Check whether the bill used an estimated reading (geschätzt) and compare it with the owner's own reading.
+  - Email the supplier in German with the contract account number, meter number, the actual reading and the date it was taken.
+  - Ask for a corrected bill based on the actual reading (Rechnungskorrektur).
+  - Ask them to suspend the payment demand (and any dunning) until the corrected bill is issued.
+  - Offer to send the dated meter photo if they need it; ask the owner for it rather than describing it.
+
+pushback:
+  - claim: "No reading was received, so the estimate stands."
+    answer: >
+      An estimate is only a fallback when no reading is available. Now that the
+      customer has given the actual reading, ask them to bill on it.
+  - claim: "Pay first, we'll correct it later."
+    answer: Refuse politely and ask for the demand to be suspended until the correction.
+
+never:
+  - Send bank details (IBAN) by email.
+  - Agree to a higher monthly payment before the bill is corrected.

@@ -50,10 +50,15 @@ def _thread_text(case: Case) -> str:
 
 
 def _parse(raw: str) -> dict[str, Any]:
+    # Smaller models sometimes skip the JSON. Treat that as a plain reply that
+    # changes nothing, rather than failing the whole run.
     match = re.search(r"\{.*\}", raw, re.DOTALL)
-    if not match:
-        raise ValueError(f"company model returned no JSON: {raw[:200]}")
-    data = json.loads(match.group(0))
+    try:
+        data = json.loads(match.group(0)) if match else {}
+    except json.JSONDecodeError:
+        data = {}
+    if not data:
+        data = {"body": raw.strip() or "Thank you for your email. We will get back to you.", "status": "open"}
     status = data.get("status", "open")
     if status not in ("open", "confirmed", "refused_final"):
         status = "open"

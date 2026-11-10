@@ -1,5 +1,7 @@
 """Stage 0: can a cheap model with a playbook finish real errands as well as a top model alone?
 
+Four errands, one task each: cancel, refund, dispute, complain.
+
 Each sample is one errand scenario. The agent works for the owner against a
 simulated company over simulated weeks, with every email passing the owner's
 approval gate. Arms are set by task options and models:
@@ -15,7 +17,7 @@ approval gate. Arms are set by task options and models:
 Options:
     -T playbooks=true|false   load the matching playbook into the agent's context
     -T approver=owner|human   simulated owner reviews each email, or you do
-    -T scenario=<id>          run one scenario only
+    -T scenario=<id>[,<id>]   run only these scenarios
     --epochs N                repeat each scenario N times (do this: models vary)
 
 Keep the company (and optional owner) model fixed across arms, or the
@@ -84,16 +86,32 @@ knowledge, and tell your owner in your closing summary that this was unproven \
 ground."""
 
 
-def load_scenarios(errand: str, scenario: str | None) -> MemoryDataset:
+ERRANDS = ["cancel", "refund", "dispute", "complain"]
+
+
+def _ids(scenarios: str | list[str] | None) -> set[str] | None:
+    if scenarios is None or scenarios == "":
+        return None
+    if isinstance(scenarios, str):
+        scenarios = scenarios.split(",")
+    return {s.strip() for s in scenarios if s.strip()}
+
+
+def load_scenarios(errand: str, scenarios: str | list[str] | None = None) -> MemoryDataset:
+    """All scenarios for an errand, or only the ids given (comma-separated or a list).
+    Ids that belong to other errands are ignored, so one list can span errands."""
     raw = yaml.safe_load((SCENARIO_DIR / f"{errand}.yaml").read_text())
+    wanted = _ids(scenarios)
     samples = [
         Sample(id=s["id"], input=s["request"], metadata={"scenario": s})
         for s in raw
-        if scenario is None or s["id"] == scenario
+        if wanted is None or s["id"] in wanted
     ]
-    if not samples:
-        raise ValueError(f"No scenario with id {scenario!r} in {errand}.yaml")
     return MemoryDataset(samples, name=errand)
+
+
+def errand_ids(errand: str) -> list[str]:
+    return [s["id"] for s in yaml.safe_load((SCENARIO_DIR / f"{errand}.yaml").read_text())]
 
 
 @solver
@@ -137,11 +155,11 @@ def open_case(use_playbooks: bool) -> Solver:
     return solve
 
 
-@task
-def cancel(
+def errand_task(
+    errand: str,
     playbooks: bool = True,
     approver: str = "owner",
-    scenario: str | None = None,
+    scenario: str | list[str] | None = None,
     message_limit: int = 80,
 ) -> Task:
     agent = react(
@@ -156,9 +174,34 @@ def cancel(
         ),
     )
     return Task(
-        dataset=load_scenarios("cancel", scenario),
+        name=errand,
+        dataset=load_scenarios(errand, scenario),
         solver=[open_case(playbooks), as_solver(agent)],
         scorer=[outcome(), safety(), effort()],
         message_limit=message_limit,
         metadata={"arm": "playbook" if playbooks else "no_playbook", "approver": approver},
     )
+
+
+# One task per errand. Same options for each:
+#   -T playbooks=true|false  -T approver=owner|human  -T scenario=id1,id2
+
+
+@task
+def cancel(playbooks: bool = True, approver: str = "owner", scenario: str | None = None, message_limit: int = 80) -> Task:
+    return errand_task("cancel", playbooks, approver, scenario, message_limit)
+
+
+@task
+def refund(playbooks: bool = True, approver: str = "owner", scenario: str | None = None, message_limit: int = 80) -> Task:
+    return errand_task("refund", playbooks, approver, scenario, message_limit)
+
+
+@task
+def dispute(playbooks: bool = True, approver: str = "owner", scenario: str | None = None, message_limit: int = 80) -> Task:
+    return errand_task("dispute", playbooks, approver, scenario, message_limit)
+
+
+@task
+def complain(playbooks: bool = True, approver: str = "owner", scenario: str | None = None, message_limit: int = 80) -> Task:
+    return errand_task("complain", playbooks, approver, scenario, message_limit)

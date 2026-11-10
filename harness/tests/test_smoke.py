@@ -145,3 +145,75 @@ def test_summary_counts_a_confirmed_run():
     assert run["summary"]["runs"] == 1
     assert run["summary"]["done"] == 1
     assert run["scenarios"][0]["closed_as"] == "done"
+
+
+# ---------- scenario and playbook files ----------
+
+import yaml  # noqa: E402
+
+from steward_harness.playbooks import find_playbook  # noqa: E402
+from steward_harness.task import ERRANDS, SCENARIO_DIR, errand_ids, load_scenarios  # noqa: E402
+
+
+def test_every_scenario_is_complete():
+    seen = set()
+    for errand in ERRANDS:
+        for sc in yaml.safe_load((SCENARIO_DIR / f"{errand}.yaml").read_text()):
+            assert sc["id"] not in seen, f"duplicate id {sc['id']}"
+            seen.add(sc["id"])
+            assert sc["errand"] == errand, sc["id"]
+            for key in ("name", "email", "account_ref", "facts", "goal"):
+                assert sc["owner"].get(key), f"{sc['id']}: owner.{key}"
+            for key in ("name", "kind", "domain", "email", "behaviour"):
+                assert sc["company"].get(key), f"{sc['id']}: company.{key}"
+            assert sc["company"]["email"].endswith("@" + sc["company"]["domain"]), sc["id"]
+
+
+def test_every_playbook_is_used_by_a_scenario():
+    used = set()
+    for errand in ERRANDS:
+        for sc in yaml.safe_load((SCENARIO_DIR / f"{errand}.yaml").read_text()):
+            found = find_playbook(errand, sc["country"], sc["company"]["kind"])
+            if found:
+                used.add(found[1]["id"])
+    on_disk = {yaml.safe_load(p.read_text())["id"] for p in (SCENARIO_DIR.parent / "playbooks").rglob("*.yaml")}
+    assert on_disk == used, f"unused playbooks: {on_disk - used}"
+
+
+def test_scenario_filter_spans_errands():
+    assert [s.id for s in load_scenarios("refund", "de-gym-stubborn,es-flight-cancelled-voucher")] == [
+        "es-flight-cancelled-voucher"
+    ]
+    assert len(load_scenarios("dispute")) == len(errand_ids("dispute"))
+
+
+def test_runner_end_to_end_without_api_keys(tmp_path, monkeypatch):
+    """The whole stage0 pipeline on mock models: run, record, skip when fresh, re-run when changed."""
+    import importlib
+    import argparse
+
+    arms = tmp_path / "arms.yaml"
+    arms.write_text(yaml.safe_dump({
+        "defaults": {"company": "mockllm/model", "epochs": 1, "max_connections": 1,
+                     "scenarios": ["de-gym-ghost", "gb-headphones-reject"]},
+        "arms": [{"name": "mock-arm", "model": "mockllm/model", "playbooks": True}],
+    }))
+    monkeypatch.setenv("STAGE0_ARMS", str(arms))
+    monkeypatch.setenv("STAGE0_RESULTS", str(tmp_path / "results"))
+    r = importlib.reload(runner)
+    monkeypatch.setattr(r, "LOG_DIR", tmp_path / "logs")
+
+    run_args = argparse.Namespace(arm=None, force=False, dry_run=False, display="none")
+    assert r.cmd_run(run_args) == 0
+    latest = r.load_latest()
+    run = r.load_run(latest["mock-arm"])
+    assert run["summary"]["runs"] == 2
+    assert run["config"]["errands"] == ["cancel", "refund"]
+    assert {row["errand"] for row in run["scenarios"]} == {"cancel", "refund"}
+    assert run["summary"]["done"] == 0  # the mock agent never closes the case
+    assert (tmp_path / "results" / "RESULTS.md").exists()
+    assert r.stale_reason(r.load_arms()[0], latest) is None
+
+    arms.write_text(arms.read_text().replace("epochs: 1", "epochs: 2"))
+    assert r.stale_reason(r.load_arms()[0], latest) == "settings, code, scenarios or playbooks changed"
+    importlib.reload(runner)

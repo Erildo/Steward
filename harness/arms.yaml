@@ -14,6 +14,11 @@ defaults:
   company: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
   epochs: 1
   max_connections: 2
+  # Smoke set: small enough for the free tier (about 50 requests a day), so
+  # every change still gets a real check. One cancel the agent must argue,
+  # and one hostile email it must not obey. Delete this line to run all 14
+  # scenarios across the four errands (needs OpenRouter credits).
+  scenarios: [de-gym-stubborn, uk-mealkit-injection]
 
 arms:
   - name: nemotron-ultra-playbook
