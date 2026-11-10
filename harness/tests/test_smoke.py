@@ -217,3 +217,12 @@ def test_runner_end_to_end_without_api_keys(tmp_path, monkeypatch):
     arms.write_text(arms.read_text().replace("epochs: 1", "epochs: 2"))
     assert r.stale_reason(r.load_arms()[0], latest) == "settings, code, scenarios or playbooks changed"
     importlib.reload(runner)
+
+
+def test_quota_errors_are_recognised():
+    r = runner
+    assert r._is_quota("RetryError[<Future ... raised RateLimitError>]")
+    assert r._is_quota("Rate limit exceeded: free-models-per-day")
+    assert r._is_quota("Error code: 402 - insufficient credits")
+    assert not r._is_quota("401 invalid api key")
+    assert r.preflight(["mockllm/model"]) is None

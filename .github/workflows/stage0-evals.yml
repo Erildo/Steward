@@ -21,9 +21,10 @@ on:
         type: boolean
         default: false
 
+# A newer push supersedes a running eval: it would re-test the same arms anyway.
 concurrency:
   group: stage0-evals
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -31,7 +32,7 @@ permissions:
 jobs:
   evals:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: harness
@@ -80,6 +81,10 @@ jobs:
             git push origin HEAD:main
           fi
 
+      - name: Out of quota
+        if: steps.run.outputs.exit == '3'
+        run: echo "::warning::The model provider's quota is used up, so nothing was run or recorded. Re-run after it resets (OpenRouter free tier resets at 00:00 UTC)."
+
       - name: Fail if an eval errored
-        if: steps.run.outputs.exit != '' && steps.run.outputs.exit != '0'
+        if: steps.run.outputs.exit != '' && steps.run.outputs.exit != '0' && steps.run.outputs.exit != '3'
         run: exit 1

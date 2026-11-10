@@ -6,6 +6,9 @@
     uv run stage0 import LOG...     record existing eval logs as an exploratory run
     uv run stage0 report            rebuild results/RESULTS.md from results/runs/
 
+Exit codes: 0 ok, 1 an eval failed, 2 bad arguments, 3 out of quota (nothing
+recorded; try again after the provider's limit resets).
+
 An arm is stale when its fingerprint changed. The fingerprint covers the arm's
 settings, the harness code that shapes behaviour, every scenario and playbook,
 and the Inspect version. So changing a model, a prompt, a tool, a scenario or a
@@ -56,6 +59,11 @@ def load_arms() -> list[dict[str, Any]]:
         resolved = {
             "epochs": 1,
             "max_connections": 4,
+            # Fail fast instead of waiting: Inspect retries forever by default,
+            # and a used-up daily quota looks like a temporary rate limit.
+            "max_retries": 3,
+            "request_timeout": 120,  # seconds per model request, retries included
+            "sample_time_limit": 900,  # seconds per errand run
             "owner": None,
             "errands": ERRANDS,
             "scenarios": None,  # None means every scenario of each errand
@@ -303,6 +311,38 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+QUOTA_EXIT = 3
+QUOTA_SIGNS = ("per-day", "rate limit", "rate_limit", "ratelimit", "429", "insufficient credits", "402")
+
+
+def _is_quota(message: str) -> bool:
+    return any(sign in message.lower() for sign in QUOTA_SIGNS)
+
+
+def preflight(models: list[str]) -> str | None:
+    """One tiny request per model, with no retries. Returns a reason to stop, or None.
+
+    Costs one request per distinct model, and saves a whole run from waiting on
+    a quota that is already used up."""
+    import asyncio
+
+    from inspect_ai.model import GenerateConfig, get_model
+
+    async def check(name: str) -> str | None:
+        try:
+            model = get_model(name, memoize=False)
+            await model.generate("Reply with OK.", config=GenerateConfig(max_retries=0, timeout=60, max_tokens=5))
+            return None
+        except Exception as ex:  # noqa: BLE001 - any failure means don't start
+            return f"{name}: {ex}"
+
+    async def check_all() -> list[str]:
+        return [r for r in await asyncio.gather(*(check(m) for m in models)) if r]
+
+    problems = asyncio.run(check_all())
+    return "\n".join(problems) or None
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     from inspect_ai import eval as inspect_eval
 
@@ -313,6 +353,15 @@ def cmd_run(args: argparse.Namespace) -> int:
     if args.arm and len(arms) != len(args.arm):
         print(f"Unknown arm in {args.arm}", file=sys.stderr)
         return 2
+
+    to_run = [a for a in arms if args.force or stale_reason(a, latest) is not None]
+    if to_run and not args.dry_run:
+        models = sorted({m for a in to_run for m in (a["model"], a["company"], a.get("owner")) if m})
+        problem = preflight(models)
+        if problem:
+            kind = "quota or rate limit" if _is_quota(problem) else "model check failed"
+            print(f"Not starting: {kind}.\n{problem[:600]}", file=sys.stderr)
+            return QUOTA_EXIT if _is_quota(problem) else 1
 
     failed = False
     for arm in arms:
@@ -343,11 +392,21 @@ def cmd_run(args: argparse.Namespace) -> int:
             model_roles=roles,
             epochs=arm["epochs"],
             max_connections=arm["max_connections"],
+            max_tasks=len(tasks),
+            max_retries=arm["max_retries"],
+            timeout=arm["request_timeout"],
+            time_limit=arm["sample_time_limit"],
             log_dir=str(LOG_DIR),
             metadata={"stage0_arm": arm["name"], "stage0_fingerprint": fp},
             display=args.display,
         )
         run = summarise(logs, arm["name"], fp, exploratory=False)
+        if run["status"] != "success" and _is_quota(" ".join(run["errors"])):
+            # Running out of quota says nothing about the agent: don't record it.
+            print(f"{arm['name']}: stopped, quota ran out mid-run. Nothing recorded.\n"
+                  f"{' '.join(run['errors'])[:400]}", file=sys.stderr)
+            write_report()
+            return QUOTA_EXIT
         name = save_run(run)
         s = run["summary"]
         print(f"{arm['name']}: {run['status']}, {s['runs']} runs, done {_pct(s['done'])}, "
@@ -376,8 +435,20 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_dotenv() -> None:
+    """Read KEY=value lines from .env without overriding the real environment."""
+    env = ROOT / ".env"
+    if not env.exists():
+        return
+    for line in env.read_text().splitlines():
+        if "=" in line and not line.lstrip().startswith("#"):
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+
+
 def main() -> None:
-    os.chdir(ROOT)  # so Inspect finds .env and relative paths resolve
+    os.chdir(ROOT)  # so relative paths resolve
+    _load_dotenv()
     parser = argparse.ArgumentParser(prog="stage0", description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
 
