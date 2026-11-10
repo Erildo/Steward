@@ -1,0 +1,19 @@
+# Planning docs stay local. Only the README is public.
+*.md
+!/README.md
+
+# Design tool working files (mocks, screenshots, logs)
+.impeccable/
+
+# Xcode and macOS
+xcuserdata/
+DerivedData/
+build/
+*.xcuserstate
+.DS_Store
+
+# Secrets, in case any ever land here
+.env
+.env.*
+*.p8
+*.mobileprovision
