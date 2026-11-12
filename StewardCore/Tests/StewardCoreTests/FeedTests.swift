@@ -109,3 +109,14 @@ private func card(_ url: String, section: FeedCard.Section = .forYou) -> FeedCar
     #expect(try store.loadTaste() == TasteProfile())
     #expect(try store.loadFeed() == nil)
 }
+
+@Test func batchSavedBeforeOpenedExistedStillLoads() throws {
+    let old = #"{"createdAt":0,"cards":[],"hidden":[]}"#
+    let batch = try JSONDecoder().decode(FeedBatch.self, from: Data(old.utf8))
+    #expect(batch.opened.isEmpty)
+
+    var opened = FeedBatch(createdAt: day, cards: [card("https://example.com/a")])
+    opened.opened.insert(opened.cards[0].id)
+    let roundTrip = try JSONDecoder().decode(FeedBatch.self, from: JSONEncoder().encode(opened))
+    #expect(roundTrip == opened)
+}

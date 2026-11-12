@@ -4,8 +4,10 @@ import StewardCore
 struct FeedView: View {
     @State private var model = FeedModel.launch()
     @State private var showsTaste = false
+    @State private var showsSaved = false
     @State private var lastHidden: FeedCard?
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
 
     var body: some View {
         NavigationStack {
@@ -13,13 +15,19 @@ struct FeedView: View {
                 .background(Palette.ground)
                 .navigationTitle("Feed")
                 .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        Button("Saved", systemImage: "bookmark") { showsSaved = true }
                         Button("Your taste", systemImage: "slider.horizontal.3") { showsTaste = true }
-                            .tint(Palette.ink)
                     }
                 }
-                .sheet(isPresented: $showsTaste) {
+                .tint(Palette.ink)
+                // The first batch waits for the owner to finish telling Steward
+                // what they like, then starts as the sheet closes.
+                .sheet(isPresented: $showsTaste, onDismiss: { Task { await model.appear() } }) {
                     TasteView().environment(model)
+                }
+                .sheet(isPresented: $showsSaved) {
+                    SavedView().environment(model)
                 }
                 .overlay(alignment: .bottom) { undoToast }
         }
@@ -38,15 +46,7 @@ struct FeedView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
                     banners
-                    if model.batch == nil {
-                        if model.status != .loading, model.status != .noModel {
-                            Text("Pull down to get today's finds.")
-                                .font(.subheadline)
-                                .foregroundStyle(Palette.muted)
-                                .frame(maxWidth: .infinity)
-                                .padding(.top, 40)
-                        }
-                    } else {
+                    if let batch = model.batch {
                         ForEach(FeedCard.Section.allCases, id: \.self) { section in
                             let cards = model.cards(in: section)
                             if !cards.isEmpty {
@@ -57,6 +57,13 @@ struct FeedView: View {
                                 }
                             }
                         }
+                        FeedEnd(batch: batch) { showsSaved = true }
+                    } else if model.status != .loading, model.status != .noModel {
+                        Text("Pull down to get today's finds.")
+                            .font(.subheadline)
+                            .foregroundStyle(Palette.muted)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 40)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -87,7 +94,7 @@ struct FeedView: View {
             .padding(.vertical, 6)
         case .noModel:
             Banner(systemImage: "bolt.horizontal.circle",
-                   text: "Steward isn't connected to a model yet, so it can't look for new things. What you tell it now is kept for when it can.",
+                   text: "Steward can't search for new things yet. What you tell it now is kept for when it can.",
                    action: ("Edit Your Taste", { showsTaste = true }))
         case .failed(let message):
             Banner(systemImage: "exclamationmark.circle", text: message)
@@ -124,7 +131,10 @@ struct FeedView: View {
             .padding(.bottom, 8)
             .transition(.move(edge: .bottom).combined(with: .opacity))
             .task(id: card.id) {
-                try? await Task.sleep(for: .seconds(4))
+                // VoiceOver users reach Undo by swiping, which takes longer
+                // than a glance, so the toast waits for the next hide instead.
+                guard !voiceOver else { return }
+                try? await Task.sleep(for: .seconds(5))
                 withAnimation(.snappy) { lastHidden = nil }
             }
         }
@@ -135,6 +145,7 @@ struct FeedView: View {
             model.react(.less, to: card)
             lastHidden = card
         }
+        AccessibilityNotification.Announcement("Hidden. Undo is at the bottom of the screen.").post()
     }
 }
 
@@ -173,11 +184,44 @@ private struct SectionHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(section.title).font(.title3.weight(.semibold)).foregroundStyle(Palette.ink)
-            Text(section.subtitle).font(.footnote).foregroundStyle(Palette.muted)
+            if let subtitle = section.subtitle {
+                Text(subtitle).font(.footnote).foregroundStyle(Palette.muted)
+            }
         }
         .padding(.top, 10)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// Where today's finds stop: how many there were, when the next ones come,
+/// and the way to what the owner kept.
+private struct FeedEnd: View {
+    let batch: FeedBatch
+    let openSaved: () -> Void
+
+    @Environment(FeedModel.self) private var model
+
+    var body: some View {
+        let count = batch.visibleCards.count
+        let today = Calendar.current.isDateInToday(batch.createdAt)
+        VStack(spacing: 4) {
+            Text(today ? "That's all for today." : "That's everything from \(batch.createdAt.formatted(.dateTime.weekday(.wide))).")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Palette.ink)
+            Text("\(count) \(count == 1 ? "find" : "finds"). Steward looks again tomorrow, or pull down for more now.")
+                .font(.footnote)
+                .foregroundStyle(Palette.muted)
+            if !model.taste.saved.isEmpty {
+                Button("Saved Finds (\(model.taste.saved.count))", systemImage: "bookmark.fill", action: openSaved)
+                    .font(.subheadline.weight(.semibold))
+                    .tint(Palette.orangeText)
+                    .frame(minHeight: 44)
+            }
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 20)
     }
 }
 
@@ -224,82 +268,86 @@ struct FeedCardView: View {
     let hide: () -> Void
 
     @Environment(FeedModel.self) private var model
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Link(destination: card.url) {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 6) {
-                        Text(card.source).fontWeight(.semibold)
-                        Text("·")
-                        Text(card.topic).lineLimit(1)
-                        Spacer(minLength: 0)
-                        Image(systemName: "arrow.up.right")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(Palette.muted)
-
-                    Text(card.title)
-                        .font(.headline)
-                        .foregroundStyle(Palette.ink)
-                        .multilineTextAlignment(.leading)
-
-                    if !card.summary.isEmpty {
-                        Text(card.summary)
-                            .font(.subheadline)
-                            .foregroundStyle(Palette.ink)
-                            .multilineTextAlignment(.leading)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(.rect)
-            }
-            .accessibilityHint("Opens in Safari")
-
+        let opened = model.isOpened(card)
+        VStack(alignment: .leading, spacing: 10) {
+            // Steward's reason leads, the way a friend says why before what.
             if !card.why.isEmpty {
                 HStack(alignment: .top, spacing: 8) {
                     StewardAvatar(size: 20, blinks: false)
                     Text(card.why)
-                        .font(.subheadline)
-                        .foregroundStyle(Palette.muted)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Palette.ink)
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("Why: \(card.why)")
             }
 
+            Button(action: open) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(card.title)
+                        .font(.headline)
+                        .foregroundStyle(opened ? Palette.muted : Palette.ink)
+                    if !card.summary.isEmpty {
+                        Text(card.summary)
+                            .font(.subheadline)
+                            .foregroundStyle(Palette.muted)
+                    }
+                    // One Text, so it wraps like a sentence at large sizes.
+                    Text("\(Text(card.source).fontWeight(.semibold)) · \(card.topic)\(opened ? " · Opened" : "")")
+                        .font(.caption)
+                        .foregroundStyle(Palette.muted)
+                        .padding(.top, 2)
+                }
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(.isLink)
+            .accessibilityHint("Opens in Safari")
+
             // One row when every label fits unwrapped; at larger text sizes the
             // save/share pair drops below, then each reaction gets its own line.
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) {
+                HStack(spacing: 0) {
                     reactions
                     Spacer(minLength: 0)
                     keepers
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) { reactions }
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 0) { reactions }
                     keepers
                 }
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 0) {
                     reactions
                     keepers
                 }
             }
             .padding(.trailing, -10)
-            .padding(.vertical, -6)
-            .font(.subheadline)
+            .padding(.vertical, -8)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.stewardBubble, in: .rect(cornerRadius: Palette.cardRadius))
+        .contentShape(.contextMenuPreview, .rect(cornerRadius: Palette.cardRadius))
+        .contextMenu { menu }
+    }
+
+    private func open() {
+        model.markOpened(card)
+        openURL(card.url)
     }
 
     @ViewBuilder
     private var reactions: some View {
         let liked = model.reaction(to: card) == .more
-        PillButton(title: "More like this", systemImage: liked ? "hand.thumbsup.fill" : "hand.thumbsup", selected: liked) {
+        QuietButton(title: "More like this", systemImage: liked ? "hand.thumbsup.fill" : "hand.thumbsup", selected: liked) {
             model.react(.more, to: card)
         }
-        PillButton(title: "Not for me", systemImage: "hand.thumbsdown", selected: false, action: hide)
+        QuietButton(title: "Not for me", systemImage: "hand.thumbsdown", selected: false, action: hide)
     }
 
     /// Save and Share: 44 pt targets whose glyphs sit close together.
@@ -322,9 +370,26 @@ struct FeedCardView: View {
         }
         .font(.subheadline)
     }
+
+    @ViewBuilder
+    private var menu: some View {
+        Button("Open", systemImage: "safari", action: open)
+        let liked = model.reaction(to: card) == .more
+        Button(liked ? "Undo More Like This" : "More Like This", systemImage: "hand.thumbsup") {
+            model.react(.more, to: card)
+        }
+        Button("Not for Me", systemImage: "hand.thumbsdown", action: hide)
+        let saved = model.isSaved(card)
+        Button(saved ? "Remove from Saved" : "Save", systemImage: saved ? "bookmark.slash" : "bookmark") {
+            model.toggleSaved(card)
+        }
+        ShareLink(item: card.url)
+    }
 }
 
-private struct PillButton: View {
+/// A reaction with no fill of its own: it stays below the find in weight and
+/// turns orange only once chosen.
+private struct QuietButton: View {
     let title: String
     let systemImage: String
     let selected: Bool
@@ -333,12 +398,9 @@ private struct PillButton: View {
     var body: some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
-                .font(.footnote.weight(.medium))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .foregroundStyle(selected ? Palette.orangeText : Palette.ink)
-                .background(Palette.ground, in: .capsule)
-                // The capsule stays compact; the tap area meets 44 pt.
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(selected ? Palette.orangeText : Palette.muted)
+                .padding(.trailing, 16)
                 .frame(minHeight: 44)
                 .contentShape(.rect)
         }
@@ -356,10 +418,10 @@ extension FeedCard.Section {
         }
     }
 
-    var subtitle: String {
+    /// Only where the title alone doesn't say it.
+    var subtitle: String? {
         switch self {
-        case .forYou: "More of what you love"
-        case .worthALook: "Next to your interests"
+        case .forYou, .worthALook: nil
         case .towardGoals: "A step forward on what you're working on"
         }
     }

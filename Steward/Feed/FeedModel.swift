@@ -109,14 +109,22 @@ final class FeedModel {
         saveTaste()
     }
 
+    /// Edits the taste file. It never starts a batch: the first one waits until
+    /// the owner closes Your Taste (`appear()`), so it isn't built from a
+    /// single word typed while they are still adding things.
     func update(_ edit: (inout TasteProfile) -> Void) {
-        let wasEmpty = taste.isEmpty
         edit(&taste)
         saveTaste()
-        if wasEmpty, !taste.isEmpty, batch == nil {
-            Task { await refresh() }
-        }
     }
+
+    func markOpened(_ card: FeedCard) {
+        guard var batch, !batch.opened.contains(card.id) else { return }
+        batch.opened.insert(card.id)
+        self.batch = batch
+        try? store.save(batch)
+    }
+
+    func isOpened(_ card: FeedCard) -> Bool { batch?.opened.contains(card.id) ?? false }
 
     func deleteEverything() {
         try? store.deleteEverything()
@@ -143,8 +151,8 @@ final class FeedModel {
         }
         if let http = error as? OpenAICompatibleClient.HTTPError {
             return http.status == 401 || http.status == 403
-                ? "Steward's model access was refused."
-                : "Steward's model had a problem (\(http.status)). Pull to try again."
+                ? "Steward wasn't allowed to search just now. Your taste is safe. Pull to try again later."
+                : "Steward's search service had a problem. Pull to try again."
         }
         if (error as? URLError) != nil {
             return "Steward couldn't reach the internet. Pull to try again."
@@ -162,7 +170,7 @@ extension FeedModel {
         case "feed":
             let store = temporaryStore()
             try? store.save(FeedSample.taste)
-            try? store.save(FeedBatch(createdAt: .now, cards: FeedSample.cards))
+            try? store.save(FeedBatch(createdAt: .now, cards: FeedSample.cards, opened: [FeedSample.cards[1].id]))
             return FeedModel(store: store, model: nil)
         case "feedEmpty":
             return FeedModel(store: temporaryStore(), model: nil)

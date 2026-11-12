@@ -41,11 +41,23 @@ public struct FeedBatch: Codable, Sendable, Equatable {
     public var cards: [FeedCard]
     /// Cards the owner said "not for me" to, hidden from this batch.
     public var hidden: Set<UUID>
+    /// Cards the owner opened, so a return visit shows what is still new.
+    public var opened: Set<UUID>
 
-    public init(createdAt: Date, cards: [FeedCard], hidden: Set<UUID> = []) {
+    public init(createdAt: Date, cards: [FeedCard], hidden: Set<UUID> = [], opened: Set<UUID> = []) {
         self.createdAt = createdAt
         self.cards = cards
         self.hidden = hidden
+        self.opened = opened
+    }
+
+    /// Feeds saved before `opened` existed still load.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        cards = try container.decode([FeedCard].self, forKey: .cards)
+        hidden = try container.decodeIfPresent(Set<UUID>.self, forKey: .hidden) ?? []
+        opened = try container.decodeIfPresent(Set<UUID>.self, forKey: .opened) ?? []
     }
 
     public var visibleCards: [FeedCard] {
