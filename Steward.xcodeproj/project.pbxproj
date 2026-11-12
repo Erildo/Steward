@@ -7,19 +7,42 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		B10000000000000000000020 /* StewardWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		B10000000000000000000020 /* StewardWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001 /* StewardWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		C10000000000000000000001 /* StewardCore in Frameworks */ = {isa = PBXBuildFile; productRef = C10000000000000000000003 /* StewardCore */; };
-		D10000000000000000000020 /* StewardShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = D10000000000000000000001; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		D10000000000000000000020 /* StewardShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = D10000000000000000000001 /* StewardShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		D10000000000000000000030 /* StewardCore in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000031 /* StewardCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		B10000000000000000000021 = {isa = PBXContainerItemProxy; containerPortal = A10000000000000000000009; proxyType = 1; remoteGlobalIDString = B10000000000000000000006; remoteInfo = StewardWidgets; };
-		D10000000000000000000021 = {isa = PBXContainerItemProxy; containerPortal = A10000000000000000000009; proxyType = 1; remoteGlobalIDString = D10000000000000000000006; remoteInfo = StewardShare; };
+		B10000000000000000000021 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000009 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B10000000000000000000006;
+			remoteInfo = StewardWidgets;
+		};
+		D10000000000000000000021 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000009 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D10000000000000000000006;
+			remoteInfo = StewardShare;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		B10000000000000000000022 /* Embed Foundation Extensions */ = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (B10000000000000000000020, D10000000000000000000020); name = "Embed Foundation Extensions"; runOnlyForDeploymentPostprocessing = 0; };
+		B10000000000000000000022 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				B10000000000000000000020 /* StewardWidgets.appex in Embed Foundation Extensions */,
+				D10000000000000000000020 /* StewardShare.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -29,61 +52,151 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		A10000000000000000000002 /* Steward */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Steward; sourceTree = "<group>"; };
-		B10000000000000000000002 /* StewardWidgets */ = {isa = PBXFileSystemSynchronizedRootGroup; path = StewardWidgets; sourceTree = "<group>"; };
-		B10000000000000000000023 /* Shared */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Shared; sourceTree = "<group>"; };
-		D10000000000000000000002 /* StewardShare */ = {isa = PBXFileSystemSynchronizedRootGroup; path = StewardShare; sourceTree = "<group>"; };
+		A10000000000000000000002 /* Steward */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Steward;
+			sourceTree = "<group>";
+		};
+		B10000000000000000000002 /* StewardWidgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = StewardWidgets;
+			sourceTree = "<group>";
+		};
+		B10000000000000000000023 /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000002 /* StewardShare */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = StewardShare;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		A10000000000000000000003 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (C10000000000000000000001 /* StewardCore in Frameworks */); runOnlyForDeploymentPostprocessing = 0; };
-		B10000000000000000000003 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-		D10000000000000000000003 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (D10000000000000000000030 /* StewardCore in Frameworks */); runOnlyForDeploymentPostprocessing = 0; };
+		A10000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C10000000000000000000001 /* StewardCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B10000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D10000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D10000000000000000000030 /* StewardCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		A10000000000000000000004 = {isa = PBXGroup; children = (A10000000000000000000002 /* Steward */, B10000000000000000000002 /* StewardWidgets */, D10000000000000000000002 /* StewardShare */, B10000000000000000000023 /* Shared */, A10000000000000000000005 /* Products */); sourceTree = "<group>"; };
-		A10000000000000000000005 /* Products */ = {isa = PBXGroup; children = (A10000000000000000000001 /* Steward.app */, B10000000000000000000001 /* StewardWidgets.appex */, D10000000000000000000001 /* StewardShare.appex */); name = Products; sourceTree = "<group>"; };
+		A10000000000000000000004 = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000002 /* Steward */,
+				B10000000000000000000002 /* StewardWidgets */,
+				D10000000000000000000002 /* StewardShare */,
+				B10000000000000000000023 /* Shared */,
+				A10000000000000000000005 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A10000000000000000000005 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000001 /* Steward.app */,
+				B10000000000000000000001 /* StewardWidgets.appex */,
+				D10000000000000000000001 /* StewardShare.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
 		A10000000000000000000006 /* Steward */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = A1000000000000000000000B;
-			buildPhases = (A10000000000000000000007, A10000000000000000000003, A10000000000000000000008, B10000000000000000000022);
-			buildRules = ();
-			dependencies = (B10000000000000000000024, D10000000000000000000024);
-			fileSystemSynchronizedGroups = (A10000000000000000000002, B10000000000000000000023);
+			buildConfigurationList = A1000000000000000000000B /* Build configuration list for PBXNativeTarget "Steward" */;
+			buildPhases = (
+				A10000000000000000000007 /* Sources */,
+				A10000000000000000000003 /* Frameworks */,
+				A10000000000000000000008 /* Resources */,
+				B10000000000000000000022 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B10000000000000000000024 /* PBXTargetDependency */,
+				D10000000000000000000024 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000002 /* Steward */,
+				B10000000000000000000023 /* Shared */,
+			);
 			name = Steward;
-			packageProductDependencies = (C10000000000000000000003 /* StewardCore */);
+			packageProductDependencies = (
+				C10000000000000000000003 /* StewardCore */,
+			);
 			productName = Steward;
-			productReference = A10000000000000000000001;
+			productReference = A10000000000000000000001 /* Steward.app */;
 			productType = "com.apple.product-type.application";
 		};
 		B10000000000000000000006 /* StewardWidgets */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = B1000000000000000000000B;
-			buildPhases = (B10000000000000000000007, B10000000000000000000003, B10000000000000000000008);
-			buildRules = ();
-			dependencies = ();
-			fileSystemSynchronizedGroups = (B10000000000000000000002, B10000000000000000000023);
+			buildConfigurationList = B1000000000000000000000B /* Build configuration list for PBXNativeTarget "StewardWidgets" */;
+			buildPhases = (
+				B10000000000000000000007 /* Sources */,
+				B10000000000000000000003 /* Frameworks */,
+				B10000000000000000000008 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				B10000000000000000000002 /* StewardWidgets */,
+				B10000000000000000000023 /* Shared */,
+			);
 			name = StewardWidgets;
-			packageProductDependencies = ();
+			packageProductDependencies = (
+			);
 			productName = StewardWidgets;
-			productReference = B10000000000000000000001;
+			productReference = B10000000000000000000001 /* StewardWidgets.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
 		D10000000000000000000006 /* StewardShare */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = D1000000000000000000000B;
-			buildPhases = (D10000000000000000000007, D10000000000000000000003, D10000000000000000000008);
-			buildRules = ();
-			dependencies = ();
-			fileSystemSynchronizedGroups = (D10000000000000000000002, B10000000000000000000023);
+			buildConfigurationList = D1000000000000000000000B /* Build configuration list for PBXNativeTarget "StewardShare" */;
+			buildPhases = (
+				D10000000000000000000007 /* Sources */,
+				D10000000000000000000003 /* Frameworks */,
+				D10000000000000000000008 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				B10000000000000000000023 /* Shared */,
+				D10000000000000000000002 /* StewardShare */,
+			);
 			name = StewardShare;
-			packageProductDependencies = (D10000000000000000000031 /* StewardCore */);
+			packageProductDependencies = (
+				D10000000000000000000031 /* StewardCore */,
+			);
 			productName = StewardShare;
-			productReference = D10000000000000000000001;
+			productReference = D10000000000000000000001 /* StewardShare.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
@@ -91,80 +204,331 @@
 /* Begin PBXProject section */
 		A10000000000000000000009 /* Project object */ = {
 			isa = PBXProject;
-			attributes = {BuildIndependentTargetsInParallel = 1; LastSwiftUpdateCheck = 2700; LastUpgradeCheck = 2700;};
-			buildConfigurationList = A1000000000000000000000A;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2700;
+				LastUpgradeCheck = 2700;
+			};
+			buildConfigurationList = A1000000000000000000000A /* Build configuration list for PBXProject "Steward" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
-			knownRegions = (en, Base);
+			knownRegions = (
+				en,
+				Base,
+			);
 			mainGroup = A10000000000000000000004;
 			minimizedProjectReferenceProxies = 1;
-			packageReferences = (C10000000000000000000002 /* XCLocalSwiftPackageReference "StewardCore" */);
+			packageReferences = (
+				C10000000000000000000002 /* XCLocalSwiftPackageReference "StewardCore" */,
+			);
 			preferredProjectObjectVersion = 77;
-			productRefGroup = A10000000000000000000005;
+			productRefGroup = A10000000000000000000005 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
-			targets = (A10000000000000000000006, B10000000000000000000006, D10000000000000000000006);
+			targets = (
+				A10000000000000000000006 /* Steward */,
+				B10000000000000000000006 /* StewardWidgets */,
+				D10000000000000000000006 /* StewardShare */,
+			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		A10000000000000000000008 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-		B10000000000000000000008 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-		D10000000000000000000008 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A10000000000000000000008 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B10000000000000000000008 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D10000000000000000000008 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		A10000000000000000000007 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-		B10000000000000000000007 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-		D10000000000000000000007 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A10000000000000000000007 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B10000000000000000000007 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D10000000000000000000007 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		B10000000000000000000024 = {isa = PBXTargetDependency; target = B10000000000000000000006; targetProxy = B10000000000000000000021; };
-		D10000000000000000000024 = {isa = PBXTargetDependency; target = D10000000000000000000006; targetProxy = D10000000000000000000021; };
+		B10000000000000000000024 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B10000000000000000000006 /* StewardWidgets */;
+			targetProxy = B10000000000000000000021 /* PBXContainerItemProxy */;
+		};
+		D10000000000000000000024 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D10000000000000000000006 /* StewardShare */;
+			targetProxy = D10000000000000000000021 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		A1000000000000000000000C /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {
-			ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; DEBUG_INFORMATION_FORMAT = dwarf; ENABLE_TESTABILITY = YES; GCC_OPTIMIZATION_LEVEL = 0; IPHONEOS_DEPLOYMENT_TARGET = 26.0; ONLY_ACTIVE_ARCH = YES; SDKROOT = iphoneos; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)"; SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-		}; name = Debug; };
-		A1000000000000000000000D /* Release */ = {isa = XCBuildConfiguration; buildSettings = {
-			ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; IPHONEOS_DEPLOYMENT_TARGET = 26.0; SDKROOT = iphoneos; SWIFT_COMPILATION_MODE = wholemodule; VALIDATE_PRODUCT = YES;
-		}; name = Release; };
-		A1000000000000000000000E /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {
-			ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_ENTITLEMENTS = Steward.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; ENABLE_PREVIEWS = YES; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = Steward; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; INFOPLIST_KEY_NSSupportsLiveActivities = YES; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks"; MARKETING_VERSION = 0.1; PRODUCT_BUNDLE_IDENTIFIER = com.steward.app; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1;
-		}; name = Debug; };
-		A1000000000000000000000F /* Release */ = {isa = XCBuildConfiguration; buildSettings = {
-			ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_ENTITLEMENTS = Steward.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; ENABLE_PREVIEWS = YES; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = Steward; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; INFOPLIST_KEY_NSSupportsLiveActivities = YES; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks"; MARKETING_VERSION = 0.1; PRODUCT_BUNDLE_IDENTIFIER = com.steward.app; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1;
-		}; name = Release; };
-		B1000000000000000000000E /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {
-			CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = StewardWidgetsInfo.plist; INFOPLIST_KEY_CFBundleDisplayName = Steward; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"; MARKETING_VERSION = 0.1; PRODUCT_BUNDLE_IDENTIFIER = com.steward.app.widgets; PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES; SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1;
-		}; name = Debug; };
-		B1000000000000000000000F /* Release */ = {isa = XCBuildConfiguration; buildSettings = {
-			CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = StewardWidgetsInfo.plist; INFOPLIST_KEY_CFBundleDisplayName = Steward; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"; MARKETING_VERSION = 0.1; PRODUCT_BUNDLE_IDENTIFIER = com.steward.app.widgets; PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES; SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1;
-		}; name = Release; };
-		D1000000000000000000000E /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {
-			CODE_SIGN_ENTITLEMENTS = StewardShare.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = StewardShareInfo.plist; INFOPLIST_KEY_CFBundleDisplayName = Steward; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"; MARKETING_VERSION = 0.1; PRODUCT_BUNDLE_IDENTIFIER = com.steward.app.share; PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES; SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1;
-		}; name = Debug; };
-		D1000000000000000000000F /* Release */ = {isa = XCBuildConfiguration; buildSettings = {
-			CODE_SIGN_ENTITLEMENTS = StewardShare.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = StewardShareInfo.plist; INFOPLIST_KEY_CFBundleDisplayName = Steward; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks"; MARKETING_VERSION = 0.1; PRODUCT_BUNDLE_IDENTIFIER = com.steward.app.share; PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES; SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1;
-		}; name = Release; };
+		A1000000000000000000000C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A1000000000000000000000D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		A1000000000000000000000E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Steward.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Steward;
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.steward.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		A1000000000000000000000F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Steward.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Steward;
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.steward.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		B1000000000000000000000E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = StewardWidgetsInfo.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Steward;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.steward.app.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		B1000000000000000000000F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = StewardWidgetsInfo.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Steward;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.steward.app.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		D1000000000000000000000E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = StewardShare.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = StewardShareInfo.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Steward;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.steward.app.share;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		D1000000000000000000000F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = StewardShare.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = StewardShareInfo.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Steward;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.steward.app.share;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		A1000000000000000000000A = {isa = XCConfigurationList; buildConfigurations = (A1000000000000000000000C, A1000000000000000000000D); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-		A1000000000000000000000B = {isa = XCConfigurationList; buildConfigurations = (A1000000000000000000000E, A1000000000000000000000F); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-		B1000000000000000000000B = {isa = XCConfigurationList; buildConfigurations = (B1000000000000000000000E, B1000000000000000000000F); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-		D1000000000000000000000B = {isa = XCConfigurationList; buildConfigurations = (D1000000000000000000000E, D1000000000000000000000F); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A1000000000000000000000A /* Build configuration list for PBXProject "Steward" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1000000000000000000000C /* Debug */,
+				A1000000000000000000000D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1000000000000000000000B /* Build configuration list for PBXNativeTarget "Steward" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1000000000000000000000E /* Debug */,
+				A1000000000000000000000F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B1000000000000000000000B /* Build configuration list for PBXNativeTarget "StewardWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B1000000000000000000000E /* Debug */,
+				B1000000000000000000000F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D1000000000000000000000B /* Build configuration list for PBXNativeTarget "StewardShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D1000000000000000000000E /* Debug */,
+				D1000000000000000000000F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		C10000000000000000000002 /* XCLocalSwiftPackageReference "StewardCore" */ = {isa = XCLocalSwiftPackageReference; relativePath = StewardCore; };
+		C10000000000000000000002 /* XCLocalSwiftPackageReference "StewardCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = StewardCore;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		C10000000000000000000003 /* StewardCore */ = {isa = XCSwiftPackageProductDependency; productName = StewardCore; };
-		D10000000000000000000031 /* StewardCore */ = {isa = XCSwiftPackageProductDependency; productName = StewardCore; };
+		C10000000000000000000003 /* StewardCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = StewardCore;
+		};
+		D10000000000000000000031 /* StewardCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = StewardCore;
+		};
 /* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A10000000000000000000009 /* Project object */;

@@ -773,7 +773,10 @@ extension TasksModel {
             .appending(path: CaseService.usesScratchFiles ? "owner-tasks-\(UUID().uuidString).json" : "OwnerTasks.json"))
         let stewardStore = JSONListStore<StewardTask>(url: taskStore.url.deletingLastPathComponent()
             .appending(path: CaseService.usesScratchFiles ? "steward-tasks-\(UUID().uuidString).json" : "StewardTasks.json"))
-        if UserDefaults.standard.string(forKey: "uiState") == "tasks" {
+        // SwiftUI may build the root view more than once; the sample errands
+        // share one folder for the whole run, so they go in only once.
+        if UserDefaults.standard.string(forKey: "uiState") == "tasks" || CaseService.isDemo, !TasksSample.seeded {
+            TasksSample.seeded = true
             for file in TasksSample.cases() { try? CaseService.store.save(file) }
             try? taskStore.save(OwnerTask.samples())
             try? stewardStore.save(StewardTask.samples())
@@ -796,6 +799,9 @@ extension TasksModel {
 
 /// Demo cases for `-uiState tasks`. Companies and people are fictional.
 enum TasksSample {
+    /// Set once the sample errands are in this run's folder.
+    @MainActor static var seeded = false
+
     static func cases(now: Date = .now) -> [CaseFile] {
         func day(_ offset: Double) -> Date { now.addingTimeInterval(offset * 86_400) }
 

@@ -169,7 +169,7 @@ extension FeedModel {
     /// folder and never call a model.
     static func launch() -> FeedModel {
         switch UserDefaults.standard.string(forKey: "uiState") {
-        case "feed":
+        case "feed", "demo":
             let store = temporaryStore()
             try? store.save(FeedSample.taste)
             try? store.save(FeedBatch(createdAt: .now, cards: FeedSample.cards, opened: [FeedSample.cards[1].id]))
