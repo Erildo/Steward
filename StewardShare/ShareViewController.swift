@@ -15,8 +15,9 @@ final class ShareViewController: UIViewController {
         let pageTitle = items.lazy.compactMap { $0.attributedContentText?.string }.first { !$0.isEmpty }
         let providers = Providers(list: items.flatMap { $0.attachments ?? [] })
 
-        Task {
+        Task { [weak self] in
             let found = await Self.extract(from: providers)
+            guard let self else { return }
             show(SharePanel(
                 url: found.url,
                 title: Self.title(pageTitle: pageTitle, text: found.text, url: found.url),

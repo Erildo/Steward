@@ -45,7 +45,7 @@ enum Appearance: String, CaseIterable, Identifiable {
     /// Shared with the Share extension through the app group, so the share
     /// sheet follows the owner's choice too. Carries over a choice made before.
     static let store: UserDefaults = {
-        let shared = UserDefaults(suiteName: "group.com.steward.app") ?? .standard
+        let shared = UserDefaults(suiteName: "group.esh.steward") ?? .standard
         if shared.string(forKey: storageKey) == nil,
            let earlier = UserDefaults.standard.string(forKey: storageKey) {
             shared.set(earlier, forKey: storageKey)

@@ -4,7 +4,7 @@
 <dict>
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.com.steward.app</string>
+		<string>group.esh.steward</string>
 	</array>
 </dict>
 </plist>

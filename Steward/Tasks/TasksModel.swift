@@ -518,7 +518,8 @@ final class TasksModel {
 
     private func change(_ id: UUID, undo message: String, _ edit: @escaping @MainActor (inout CaseFile) -> Void) {
         guard let before = file(id), !working.contains(id) else { return }
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+            guard let self else { return }
             do {
                 try await write(id, edit)
                 offerUndo(message) { [weak self] in
