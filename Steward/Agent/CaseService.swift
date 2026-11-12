@@ -9,12 +9,14 @@ import StewardCore
 enum CaseService {
     private static let launchState = UserDefaults.standard.string(forKey: "uiState")
 
-    /// True for the Tasks sample launches, which keep their cases in a
-    /// temporary folder and never touch the owner's files.
+    /// True for the Tasks sample launches, which show sample errands.
     static let isTasksSample = launchState == "tasks" || launchState == "tasksEmpty"
 
-    static let store: CaseStore = isTasksSample
-        ? CaseStore(folder: URL.temporaryDirectory.appending(path: "tasks-sample-\(UUID().uuidString)"))
+    /// Debug launches (the Tasks sample and the simulated agent run) keep their
+    /// cases in a fresh temporary folder, so test cases never mix with the
+    /// owner's own.
+    static let store: CaseStore = isTasksSample || launchState == "agent"
+        ? CaseStore(folder: URL.temporaryDirectory.appending(path: "cases-\(launchState ?? "debug")-\(UUID().uuidString)"))
         : CaseStore(folder: URL.documentsDirectory.appending(path: "Cases"))
 
     /// `nil` until a model and real mail are connected: then nothing can act on
