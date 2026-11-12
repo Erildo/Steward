@@ -209,6 +209,7 @@ def test_runner_end_to_end_without_api_keys(tmp_path, monkeypatch):
     run = r.load_run(latest["mock-arm"])
     assert run["summary"]["runs"] == 2
     assert run["config"]["errands"] == ["cancel", "refund"]
+    assert run["config"]["playbooks"] is True
     assert {row["errand"] for row in run["scenarios"]} == {"cancel", "refund"}
     assert run["summary"]["done"] == 0  # the mock agent never closes the case
     assert (tmp_path / "results" / "RESULTS.md").exists()

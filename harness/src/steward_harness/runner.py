@@ -119,6 +119,16 @@ def stale_reason(arm: dict[str, Any], latest: dict[str, str]) -> str | None:
 # ---------- summarising eval logs ----------
 
 
+def _used_playbooks(log: Any) -> bool | None:
+    """Whether the run gave the agent playbooks. `errand_task` is called directly,
+    not through the task registry, so its arguments never reach `task_args`; the
+    task's own metadata records the arm instead."""
+    arm = (log.eval.metadata or {}).get("arm")
+    if arm in ("playbook", "no_playbook"):
+        return arm == "playbook"
+    return (log.eval.task_args or {}).get("playbooks")
+
+
 def summarise(logs: list[Any], arm_name: str, fp: str, exploratory: bool) -> dict[str, Any]:
     first = logs[0]
     rows = []
@@ -149,7 +159,6 @@ def summarise(logs: list[Any], arm_name: str, fp: str, exploratory: bool) -> dic
         vals = [r[key] for r in rows if r.get(key) is not None]
         return round(mean(vals), 3) if vals else None
 
-    task_args = first.eval.task_args
     roles = {k: v.model for k, v in (first.eval.model_roles or {}).items()}
     rev = first.eval.revision
     return {
@@ -163,7 +172,7 @@ def summarise(logs: list[Any], arm_name: str, fp: str, exploratory: bool) -> dic
             "model": first.eval.model,
             "company": roles.get("company"),
             "owner": roles.get("owner"),
-            "playbooks": task_args.get("playbooks"),
+            "playbooks": _used_playbooks(first),
             "epochs": first.eval.config.epochs,
             "errands": sorted({log.eval.task.split("/")[-1] for log in logs}),
         },
