@@ -52,7 +52,8 @@ struct FeedView: View {
                             if !cards.isEmpty {
                                 SectionHeader(section: section)
                                 ForEach(cards) { card in
-                                    FeedCardView(card: card) { hide(card) }
+                                    // Each section opens on its lead find, pictured large.
+                                    FeedCardView(card: card, isLead: card.id == cards.first?.id) { hide(card) }
                                         .transition(.opacity.combined(with: .scale(scale: 0.96)))
                                 }
                             }
@@ -265,73 +266,105 @@ private struct Banner: View {
 
 struct FeedCardView: View {
     let card: FeedCard
+    var isLead = false
     let hide: () -> Void
 
     @Environment(FeedModel.self) private var model
+    @Environment(AppRouter.self) private var router
     @Environment(\.openURL) private var openURL
 
     var body: some View {
         let opened = model.isOpened(card)
-        VStack(alignment: .leading, spacing: 10) {
-            // Steward's reason leads, the way a friend says why before what.
-            if !card.why.isEmpty {
-                HStack(alignment: .top, spacing: 8) {
-                    StewardAvatar(size: 20, blinks: false)
-                    Text(card.why)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(Palette.ink)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Why: \(card.why)")
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            // The page's own picture, when it has one.
+            if isLead { LeadImageView(url: card.url, style: .banner) }
 
-            Button(action: open) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(card.title)
-                        .font(.headline)
-                        .foregroundStyle(opened ? Palette.muted : Palette.ink)
-                    if !card.summary.isEmpty {
-                        Text(card.summary)
-                            .font(.subheadline)
-                            .foregroundStyle(Palette.muted)
+            VStack(alignment: .leading, spacing: 10) {
+                // Steward's reason leads, the way a friend says why before what.
+                if !card.why.isEmpty {
+                    HStack(alignment: .top, spacing: 8) {
+                        StewardAvatar(size: 20, blinks: false)
+                        Text(card.why)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Palette.ink)
                     }
-                    // One Text, so it wraps like a sentence at large sizes.
-                    Text("\(Text(card.source).fontWeight(.semibold)) · \(card.topic)\(opened ? " · Opened" : "")")
-                        .font(.caption)
-                        .foregroundStyle(Palette.muted)
-                        .padding(.top, 2)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Why: \(card.why)")
                 }
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .accessibilityAddTraits(.isLink)
-            .accessibilityHint("Opens in Safari")
 
-            // One row when every label fits unwrapped; at larger text sizes the
-            // save/share pair drops below, then each reaction gets its own line.
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 0) {
-                    reactions
-                    Spacer(minLength: 0)
-                    keepers
+                Button(action: open) {
+                    HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(card.title)
+                            .font(.headline)
+                            .foregroundStyle(opened ? Palette.muted : Palette.ink)
+                        if !card.summary.isEmpty {
+                            Text(card.summary)
+                                .font(.subheadline)
+                                .foregroundStyle(Palette.muted)
+                        }
+                        // One Text, so it wraps like a sentence at large sizes.
+                        Text("\(Text(card.source).fontWeight(.semibold)) · \(card.topic)\(opened ? " · Opened" : "")")
+                            .font(.caption)
+                            .foregroundStyle(Palette.muted)
+                            .padding(.top, 2)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    if !isLead { LeadImageView(url: card.url, style: .thumbnail) }
+                    }
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(.rect)
                 }
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 0) { reactions }
-                    keepers
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(.isLink)
+                .accessibilityHint("Opens in Safari")
+
+                if let lens = card.lens {
+                    FeedLensView(lens: lens)
+                        .padding(.top, 4)
+                    if let follow = FollowUp(card: card) {
+                        Button {
+                            router.askSteward(follow.request)
+                        } label: {
+                            HStack(spacing: 8) {
+                                StewardAvatar(size: 22, blinks: false)
+                                Text(follow.title)
+                            }
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .tint(Palette.orangeText)
+                        .frame(minHeight: 44)
+                        .padding(.vertical, -6)
+                        .accessibilityHint("Opens a chat with Steward, written but not sent")
+                    }
                 }
-                VStack(alignment: .leading, spacing: 0) {
-                    reactions
-                    keepers
+
+                // One row when every label fits unwrapped; at larger text sizes the
+                // save/share pair drops below, then each reaction gets its own line.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 0) {
+                        reactions
+                        Spacer(minLength: 0)
+                        keepers
+                    }
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(spacing: 0) { reactions }
+                        keepers
+                    }
+                    VStack(alignment: .leading, spacing: 0) {
+                        reactions
+                        keepers
+                    }
                 }
+                .padding(.trailing, -10)
+                .padding(.vertical, -8)
             }
-            .padding(.trailing, -10)
-            .padding(.vertical, -8)
+            .padding(14)
         }
-        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Palette.stewardBubble, in: .rect(cornerRadius: Palette.cardRadius))
+        .background(Palette.stewardBubble)
+        .clipShape(.rect(cornerRadius: Palette.cardRadius))
         .contentShape(.contextMenuPreview, .rect(cornerRadius: Palette.cardRadius))
         .contextMenu { menu }
     }
@@ -379,11 +412,39 @@ struct FeedCardView: View {
             model.react(.more, to: card)
         }
         Button("Not for Me", systemImage: "hand.thumbsdown", action: hide)
+        Button("Ask Steward", systemImage: "bubble.left") {
+            router.askSteward(FollowUp(card: card)?.request ?? "Tell me more about \"\(card.title)\": \(card.url.absoluteString)")
+        }
         let saved = model.isSaved(card)
         Button(saved ? "Remove from Saved" : "Save", systemImage: saved ? "bookmark.slash" : "bookmark") {
             model.toggleSaved(card)
         }
         ShareLink(item: card.url)
+    }
+}
+
+/// What Steward can do next with a find whose lens invites it: start the
+/// plan, keep the date, or help choose. Handed to Chat written, not sent.
+private struct FollowUp {
+    let title: String
+    let request: String
+
+    init?(card: FeedCard) {
+        let link = card.url.absoluteString
+        switch card.lens {
+        case .plan:
+            title = "Start This With Steward"
+            request = "Help me start this plan and keep me on track: \"\(card.title)\" (\(link))"
+        case .date(let spot):
+            guard let date = spot.date, date > .now else { return nil }
+            title = "Remind Me"
+            request = "Remind me before \(date.formatted(.dateTime.weekday(.wide).day().month(.wide))): \(spot.title), for \"\(card.title)\" (\(link))"
+        case .compare(let compare):
+            title = "Help Me Choose"
+            request = "Help me choose between \(compare.options.map(\.name).joined(separator: ", ")) for \"\(card.title)\" (\(link))"
+        default:
+            return nil
+        }
     }
 }
 

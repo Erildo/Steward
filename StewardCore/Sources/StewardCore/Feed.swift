@@ -22,8 +22,10 @@ public struct FeedCard: Codable, Sendable, Equatable, Identifiable {
     public var source: String
     /// A short label for what the card is about, used to learn from reactions.
     public var topic: String
+    /// A visual that shows what the find is, when one helps.
+    public var lens: FeedLens?
 
-    public init(id: UUID = UUID(), section: Section, title: String, summary: String, why: String, url: URL, source: String, topic: String) {
+    public init(id: UUID = UUID(), section: Section, title: String, summary: String, why: String, url: URL, source: String, topic: String, lens: FeedLens? = nil) {
         self.id = id
         self.section = section
         self.title = title
@@ -32,6 +34,7 @@ public struct FeedCard: Codable, Sendable, Equatable, Identifiable {
         self.url = url
         self.source = source
         self.topic = topic
+        self.lens = lens
     }
 }
 

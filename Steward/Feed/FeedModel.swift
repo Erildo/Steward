@@ -62,6 +62,7 @@ final class FeedModel {
         status = .loading
         do {
             let next = try await composer.compose(for: taste, after: batch)
+            LeadImages.shared.prefetch(next.cards.map(\.url))
             batch = next
             try? store.save(next)
             status = .idle
@@ -139,6 +140,7 @@ final class FeedModel {
     private func load() {
         taste = (try? store.loadTaste()) ?? TasteProfile()
         batch = try? store.loadFeed()
+        if let batch { LeadImages.shared.prefetch(batch.cards.map(\.url)) }
     }
 
     private func saveTaste() {
@@ -184,7 +186,9 @@ extension FeedModel {
     }
 }
 
-/// Demo content for `-uiState feed`. Links point at example.com on purpose.
+/// Demo content for `-uiState feed`. The finds are made up and labeled
+/// "Sample"; their links go to real Wikipedia pages on the topic, so the lead
+/// pictures that load are real ones. Each lens kind appears once.
 enum FeedSample {
     static let taste = TasteProfile(
         loves: ["Denis Villeneuve films", "Long-form tech interviews", "Japanese city pop"],
@@ -193,18 +197,50 @@ enum FeedSample {
     )
 
     static let cards: [FeedCard] = [
-        card(.forYou, "A first look at Villeneuve's next project", "Production notes and the first official stills.", "You love his films; this is the clearest look yet at what's next.", "Sample Film Weekly", "Villeneuve"),
-        card(.forYou, "Three hours with a chip designer", "A long conversation on why the next generation of chips is so hard to build.", "Your kind of interview, and it touches the chip-making you're curious about.", "Sample Podcast", "Tech interviews"),
-        card(.forYou, "The 1980s Tokyo albums that shaped city pop", "A listening guide to ten records, with where to stream them.", "You love city pop; three of these are rarely on playlists.", "Sample Music Review", "City pop"),
-        card(.worthALook, "Why your espresso tastes sour, explained with charts", "Extraction, grind size and temperature, without the jargon.", "You're curious about espresso; this is the one guide that makes it click.", "Sample Coffee Lab", "Home espresso"),
-        card(.worthALook, "Inside a factory that makes the machines that make chips", "A photo essay from the cleanest rooms on earth.", "Next door to your interest in how chips are made.", "Sample Science Mag", "Chipmaking"),
-        card(.towardGoals, "A 16-week half marathon plan for April races", "Three runs a week, built for first-timers.", "Starting this week lines up with an April race.", "Sample Running Club", "Half marathon"),
-        card(.towardGoals, "Italian podcast for learners, slowly spoken", "Twenty-minute episodes on everyday topics.", "Fits your commute and your goal to get conversational.", "Sample Language School", "Italian"),
+        card(.forYou, "A first look at Villeneuve's next project", "Production notes and the first official stills.",
+             "You love his films; this is the clearest look yet at what's next.", "Sample Film Weekly", "Villeneuve", "Denis_Villeneuve"),
+        card(.forYou, "Three hours with a chip designer", "A long conversation on why the next generation of chips is so hard to build.",
+             "Your kind of interview, and it touches the chip-making you're curious about.", "Sample Podcast", "Tech interviews", "Semiconductor_device_fabrication",
+             lens: .facts([.init(label: "Length", value: "3 h 10 min"), .init(label: "Format", value: "Audio"), .init(label: "Level", value: "Deep dive")])),
+        card(.forYou, "The 1980s Tokyo albums that shaped city pop", "A listening guide to ten records, with where to stream them.",
+             "You love city pop; three of these are rarely on playlists.", "Sample Music Review", "City pop", "City_pop",
+             lens: .list(.init(title: "The ten records", items: [
+                 "Tatsuro Yamashita, For You", "Mariya Takeuchi, Variety", "Anri, Timely!!", "Miki Matsubara, Pocket Park",
+                 "Junko Ohashi, Magical", "Hiroshi Sato, Awakening", "Tomoko Aran, Fuyü-Kūkan", "Eiichi Ohtaki, A Long Vacation",
+                 "Toshiki Kadomatsu, Sea Is a Lady", "Momoko Kikuchi, Adventure",
+             ]))),
+        card(.worthALook, "Why your espresso tastes sour, explained with charts", "Extraction, grind size and temperature, without the jargon.",
+             "You're curious about espresso; this is the one guide that makes it click.", "Sample Coffee Lab", "Home espresso", "Espresso",
+             lens: .compare(.init(title: "If your shot tastes sour", options: [
+                 .init(name: "Grind finer", detail: "Slows the shot so more flavour comes out", pick: true),
+                 .init(name: "Hotter water", detail: "One or two degrees up"),
+                 .init(name: "Longer shot", detail: "More water through the same coffee"),
+             ]))),
+        card(.worthALook, "Inside a factory that makes the machines that make chips", "A photo essay from the cleanest rooms on earth.",
+             "Next door to your interest in how chips are made.", "Sample Science Mag", "Chipmaking", "Cleanroom"),
+        card(.towardGoals, "A 16-week half marathon plan for April races", "Three runs a week, built for first-timers.",
+             "Starting this week lines up with an April race.", "Sample Running Club", "Half marathon", "Half_marathon",
+             lens: .plan(.init(title: "16 weeks to race day", steps: [
+                 .init(when: "Weeks 1–4", title: "Three easy runs a week"),
+                 .init(when: "Weeks 5–8", title: "Add a weekly long run"),
+                 .init(when: "Weeks 9–12", title: "Tempo runs; long run up to 16 km"),
+                 .init(when: "Weeks 13–15", title: "Peak, then ease off"),
+                 .init(when: "Week 16", title: "Race day"),
+             ]))),
+        card(.towardGoals, "Italian podcast for learners, slowly spoken", "Twenty-minute episodes on everyday topics.",
+             "Fits your commute and your goal to get conversational.", "Sample Language School", "Italian", "Italian_language",
+             lens: .date(.init(day: inDays(3), title: "New season starts"))),
     ]
 
-    private static func card(_ section: FeedCard.Section, _ title: String, _ summary: String, _ why: String, _ source: String, _ topic: String) -> FeedCard {
+    private static func inDays(_ days: Int) -> String {
+        let date = Calendar.current.date(byAdding: .day, value: days, to: .now) ?? .now
+        return date.formatted(.iso8601.year().month().day())
+    }
+
+    private static func card(_ section: FeedCard.Section, _ title: String, _ summary: String, _ why: String,
+                             _ source: String, _ topic: String, _ page: String, lens: FeedLens? = nil) -> FeedCard {
         FeedCard(section: section, title: title, summary: summary, why: why,
-                 url: URL(string: "https://example.com/\(topic.lowercased().replacingOccurrences(of: " ", with: "-"))")!,
-                 source: source, topic: topic)
+                 url: URL(string: "https://en.wikipedia.org/wiki/\(page)")!,
+                 source: source, topic: topic, lens: lens)
     }
 }

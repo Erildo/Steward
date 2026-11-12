@@ -59,9 +59,22 @@ public struct FeedComposer: Sendable {
         "why" speaks to the owner in one short sentence, plain and specific to them, e.g. \
         "You loved Dune; this is Villeneuve's next one." No hype, no exclamation marks.
 
+        A card may carry one "lens", a small visual drawn in the app, when it shows the find better than words. \
+        Use only facts from the page. Most cards need none; never pad one out. Lenses:
+        - facts: 2 to 4 short numbers or attributes, each value 14 characters or fewer. \
+        {"type":"facts","items":[{"label":"Length","value":"3 h"},{"label":"Cost","value":"Free"}]}
+        - plan: a training plan, course or itinerary in order, 2 to 6 steps. \
+        {"type":"plan","title":"16 weeks to race day","steps":[{"when":"Weeks 1-4","title":"Three easy runs a week"}]}
+        - list: what's inside, numbered, 2 to 12 items. {"type":"list","title":"The ten records","items":["..."]}
+        - compare: 2 or 3 options side by side, at most one with "pick": true for this owner. \
+        {"type":"compare","title":"...","options":[{"name":"...","detail":"...","pick":true}]}
+        - date: a day that matters to the owner, such as a release, event or closing date. \
+        {"type":"date","day":"YYYY-MM-DD","title":"Tickets go on sale"}
+
         Reply with only this JSON, no other text:
         {"cards":[{"section":"for_you|worth_a_look|toward_goals","title":"...","summary":"one or two sentences",\
-        "why":"...","url":"https://...","source":"site or creator name","topic":"two to four words"}]}
+        "why":"...","url":"https://...","source":"site or creator name","topic":"two to four words","lens":{...}}]}
+        "lens" is optional.
         """
     }
 
@@ -115,7 +128,8 @@ public struct FeedComposer: Sendable {
                 why: card.why?.trimmed ?? "",
                 url: url,
                 source: card.source?.trimmed.nonEmpty ?? host.replacingOccurrences(of: "www.", with: ""),
-                topic: card.topic?.trimmed.nonEmpty ?? title
+                topic: card.topic?.trimmed.nonEmpty ?? title,
+                lens: card.lens?.value?.usable
             )
         }
     }
@@ -124,6 +138,12 @@ public struct FeedComposer: Sendable {
         var cards: [Card]
         struct Card: Decodable {
             var section, title, summary, why, url, source, topic: String?
+            var lens: Lenient?
+        }
+        /// A lens that doesn't decode is dropped, not the card.
+        struct Lenient: Decodable {
+            var value: FeedLens?
+            init(from decoder: Decoder) throws { value = try? FeedLens(from: decoder) }
         }
     }
 }

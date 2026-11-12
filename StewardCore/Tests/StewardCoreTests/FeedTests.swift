@@ -120,3 +120,37 @@ private func card(_ url: String, section: FeedCard.Section = .forYou) -> FeedCar
     let roundTrip = try JSONDecoder().decode(FeedBatch.self, from: JSONEncoder().encode(opened))
     #expect(roundTrip == opened)
 }
+
+@Test func lensesAreKeptCheckedOrDroppedWithoutLosingTheCard() {
+    let raw = """
+    {"cards":[
+      {"section":"for_you","title":"A","url":"https://example.com/a",
+       "lens":{"type":"facts","items":[{"label":"Length","value":"3 h"},{"label":"Cost","value":"Free"},{"label":"Too long","value":"a value far too long to fit"}]}},
+      {"section":"for_you","title":"B","url":"https://example.com/b","lens":{"type":"facts","items":[{"label":"Only","value":"one"}]}},
+      {"section":"for_you","title":"C","url":"https://example.com/c","lens":{"type":"hologram"}},
+      {"section":"for_you","title":"D","url":"https://example.com/d",
+       "lens":{"type":"compare","title":"Grind","options":[{"name":"Fine","pick":true},{"name":"Medium","detail":"x","pick":true}]}},
+      {"section":"for_you","title":"E","url":"https://example.com/e","lens":{"type":"date","day":"2026-13-40","title":"Never"}},
+      {"section":"for_you","title":"F","url":"https://example.com/f","lens":{"type":"date","day":"2027-04-12","title":"Race day"}}
+    ]}
+    """
+    let cards = FeedComposer.parse(raw)
+    #expect(cards.map(\.title) == ["A", "B", "C", "D", "E", "F"])
+    #expect(cards[0].lens == .facts([.init(label: "Length", value: "3 h"), .init(label: "Cost", value: "Free")]))
+    #expect(cards[1].lens == nil)
+    #expect(cards[2].lens == nil)
+    guard case .compare(let compare) = cards[3].lens else { Issue.record("compare dropped"); return }
+    #expect(compare.options.map(\.pick) == [true, false])
+    #expect(cards[4].lens == nil)
+    #expect(cards[5].lens == .date(.init(day: "2027-04-12", title: "Race day")))
+}
+
+@Test func lensRoundTripsAndOldCardsStillLoad() throws {
+    var withLens = card("https://example.com/a")
+    withLens.lens = .plan(.init(title: "Plan", steps: [.init(when: "Week 1", title: "Easy runs"), .init(title: "Race")]))
+    let back = try JSONDecoder().decode(FeedCard.self, from: JSONEncoder().encode(withLens))
+    #expect(back == withLens)
+
+    let old = #"{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","section":"for_you","title":"T","summary":"","why":"","url":"https://example.com/x","source":"s","topic":"t"}"#
+    #expect(try JSONDecoder().decode(FeedCard.self, from: Data(old.utf8)).lens == nil)
+}
