@@ -39,6 +39,16 @@ public struct Agent: Sendable {
 
     public struct TooManySteps: Error {}
 
+    /// A wake that stopped partway, for example because the model was
+    /// unreachable or ran out of steps. `file` holds everything that already
+    /// happened, an approved email that was sent included, so the caller must
+    /// save it. Saving it prevents the next approval from sending the email
+    /// again. The case is left in `.new`, and waking it with `.start` resumes it.
+    public struct WakeFailed: Error {
+        public var file: CaseFile
+        public var underlying: any Error
+    }
+
     public func wake(_ input: CaseFile, with wake: Wake) async throws -> CaseFile {
         var file = input
         if case .closed = file.state { return file }
@@ -100,6 +110,15 @@ public struct Agent: Sendable {
             file.transcript.append(.user("Please handle this \(file.errand) with \(file.company.name)."))
         }
 
+        do {
+            return try await steps(&file, system: system)
+        } catch {
+            file.log("wake_failed", "Stopped partway: \(error). Resume to carry on.", at: now())
+            throw WakeFailed(file: file, underlying: error)
+        }
+    }
+
+    private func steps(_ file: inout CaseFile, system: String) async throws -> CaseFile {
         for _ in 0..<maxSteps {
             let turn = try await model.complete(system: system, messages: file.transcript, tools: Prompt.tools)
             file.transcript.append(.assistant(text: turn.text, toolCalls: turn.toolCalls))
@@ -153,7 +172,13 @@ public struct Agent: Sendable {
             file.log("ask_owner", question, at: now())
         case "close_case":
             let status = CaseFile.Closure.Status(rawValue: args["status"]?.string ?? "") ?? .needsOwner
-            let closure = CaseFile.Closure(status: status, summary: args["summary"]?.string ?? "", evidence: args["evidence"]?.string ?? "", date: now())
+            let evidence = args["evidence"]?.string ?? ""
+            if status == .done, let reason = Gate.checkEvidence(evidence, in: file) {
+                file.log("close_rejected", reason, at: now())
+                file.transcript.append(.tool(callID: call.id, content: "Not closed: \(reason)"))
+                break
+            }
+            let closure = CaseFile.Closure(status: status, summary: args["summary"]?.string ?? "", evidence: evidence, date: now())
             file.closure = closure
             file.state = .closed
             file.transcript.append(.tool(callID: call.id, content: "Case closed as \(status.rawValue)."))

@@ -31,7 +31,15 @@ final class CaseRunner {
 
     func wake(_ id: UUID, with wake: Wake) async throws -> CaseFile {
         guard let file = cases[id] else { throw UnknownCase() }
-        let next = try await agent.wake(file, with: wake)
+        let next: CaseFile
+        do {
+            next = try await agent.wake(file, with: wake)
+        } catch let failed as Agent.WakeFailed {
+            // Keep what already happened (a sent email above all), then report.
+            cases[id] = failed.file
+            try store.save(failed.file)
+            throw failed.underlying
+        }
         cases[id] = next
         try store.save(next)
         return next

@@ -5,10 +5,11 @@ the owner's approval gate (see gate.py) before it runs.
 """
 
 from inspect_ai.model import ChatMessageSystem, ChatMessageUser, get_model
-from inspect_ai.tool import Tool, tool
+from inspect_ai.tool import Tool, ToolError, tool
 
 from .case import current_case
 from .company import company_receives
+from .gate import check_evidence
 
 
 def _deliver_due(case, until_day: int) -> list[dict]:
@@ -155,6 +156,10 @@ def close_case() -> Tool:
             evidence: For "done", quote the company's written confirmation exactly. Otherwise leave empty.
         """
         case = current_case()
+        if status == "done" and (reason := check_evidence(evidence, case.emails)):
+            case.log("close_rejected", reason)
+            # An error result keeps the agent going: Inspect only ends on a clean submit.
+            raise ToolError(f"Not closed: {reason}")
         case.closed = {"status": status, "summary": summary, "evidence": evidence, "day": case.day}
         case.log("closed", f"{status}: {summary}")
         return f"Case closed as {status}."

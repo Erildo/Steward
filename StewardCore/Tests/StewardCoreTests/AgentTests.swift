@@ -155,3 +155,61 @@ func agent(_ turns: [AssistantTurn], _ mail: SentMail, _ clock: Clock) -> Agent 
     #expect(try store.load(file.id) == file)
     #expect(try store.all().count == 1)
 }
+
+@Test func failedWakeAfterApprovalKeepsTheSentEmailSoItIsNotResent() async throws {
+    let mail = SentMail(), clock = Clock()
+    // The model answers once, then becomes unreachable right after the send.
+    let steward = agent([
+        call("1", "send_email", ["to": .string("kundenservice@fitwerk.example"), "subject": .string("Kündigung"), "body": .string("Bitte kündigen.")]),
+    ], mail, clock)
+    let asking = try await steward.wake(gymCase(), with: .start)
+
+    var saved = asking
+    do {
+        _ = try await steward.wake(asking, with: .approval(approved: true))
+        Issue.record("expected the wake to fail")
+    } catch let failed as Agent.WakeFailed {
+        #expect(failed.underlying is ScriptedModelClient.ScriptExhausted)
+        saved = failed.file
+    }
+    #expect(await mail.sent.count == 1)
+    #expect(saved.state == .new, "no longer waiting for approval, so it can't be approved twice")
+    #expect(saved.emails.map(\.direction) == [.outgoing])
+    #expect(saved.events.contains { $0.kind == "wake_failed" })
+
+    // Resuming carries on from the saved file without sending again.
+    let resumed = agent([
+        call("2", "close_case", ["status": .string("needs_owner"), "summary": .string("Sent, awaiting reply."), "evidence": .string("")]),
+    ], mail, clock)
+    let file = try await resumed.wake(saved, with: .start)
+    #expect(file.state == .closed)
+    #expect(await mail.sent.count == 1)
+}
+
+@Test func doneWithoutTheCompanysWordsIsRejected() async throws {
+    let mail = SentMail(), clock = Clock()
+    let steward = agent([
+        call("1", "wait_for_reply", ["max_days": .number(7)]),
+        call("2", "close_case", ["status": .string("done"), "summary": .string("Cancelled."), "evidence": .string("Your membership is cancelled.")]),
+        call("3", "close_case", ["status": .string("done"), "summary": .string("Cancelled."), "evidence": .string("“Wir bestätigen die Kündigung” … zum 10.12.2026")]),
+    ], mail, clock)
+    var file = try await steward.wake(gymCase(), with: .start)
+    file = try await steward.wake(file, with: .mail([reply("Hallo! Wir bestätigen die Kündigung zum 10.12.2026. Grüße", on: clock.now)]))
+
+    #expect(file.transcript.contains { if case .tool("2", let c) = $0 { c.hasPrefix("Not closed:") } else { false } })
+    #expect(file.events.contains { $0.kind == "close_rejected" })
+    #expect(file.closure?.status == .done, "a faithful quote with typographic marks and an ellipsis passes")
+}
+
+@Test func evidenceRules() {
+    var file = gymCase()
+    file.emails = [
+        CaseFile.Email(direction: .outgoing, date: .now, from: "case-7f3a@steward.example", to: "kundenservice@fitwerk.example", subject: "Kündigung", body: "Bitte bestätigen Sie die Kündigung schriftlich."),
+        reply("Wir haben Ihre Anfrage erhalten.", on: .now),
+    ]
+    #expect(Gate.checkEvidence("", in: file) != nil, "empty")
+    #expect(Gate.checkEvidence("ok", in: file) != nil, "too short to show anything")
+    #expect(Gate.checkEvidence("bestätigen Sie die Kündigung", in: file) != nil, "the owner's own email is not evidence")
+    #expect(Gate.checkEvidence("WIR HABEN IHRE ANFRAGE ERHALTEN", in: file) == nil)
+    #expect(Gate.checkEvidence("Wir haben ... erhalten", in: file) == nil)
+}

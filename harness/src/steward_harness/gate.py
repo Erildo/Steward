@@ -12,6 +12,7 @@ review each email yourself instead of the simulated owner.
 """
 
 import re
+import unicodedata
 
 from inspect_ai.approval import (
     Approval,
@@ -40,6 +41,39 @@ REJECT: <short reason in your own words>
 
 def _normalise(text: str) -> str:
     return re.sub(r"[\s\-]", "", text).lower()
+
+
+MINIMUM_EVIDENCE = 8
+"""Fewer letters than this can't show a confirmation ("ok", "yes")."""
+
+
+def _letters(text: str) -> str:
+    """Lowercased letters and digits only."""
+    return "".join(c for c in unicodedata.normalize("NFC", text).lower() if c.isalnum())
+
+
+def check_evidence(evidence: str, emails: list[dict]) -> str | None:
+    """The rule for closing a case as done: the evidence must quote the company's
+    own words from one of its emails. Fragments may be joined with "..." and each
+    must appear in the same email. Case, spacing and punctuation don't count.
+    Returns why the evidence fails, or None. Mirrors Gate.checkEvidence in StewardCore.
+    """
+    fragments = [f for f in (_letters(p) for p in evidence.replace("\u2026", "...").split("...")) if f]
+    if sum(len(f) for f in fragments) < MINIMUM_EVIDENCE:
+        return (
+            'for "done", quote the company\'s written confirmation as evidence. '
+            "Quote it word for word, or close with another status."
+        )
+    for email in emails:
+        if email["direction"] != "in":
+            continue
+        text = _letters(email["subject"] + "\n" + email["body"])
+        if all(f in text for f in fragments):
+            return None
+    return (
+        "the evidence doesn't match any email from the company. "
+        "Quote its confirmation word for word, or close with another status."
+    )
 
 
 @approver(name="owner_gate")
