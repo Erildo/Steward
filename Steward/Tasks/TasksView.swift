@@ -1,8 +1,8 @@
 import SwiftUI
 import StewardCore
 
-/// Your to-dos and Steward's errands in one list, grouped by who acts next:
-/// Steward waiting on you, yours, Steward's, and done.
+/// Two lists behind one switch: what you handed to Steward, grouped by who
+/// acts next, and your own to-dos.
 struct TasksView: View {
     @Bindable var model: TasksModel
 
@@ -12,15 +12,15 @@ struct TasksView: View {
     @State private var adding: AddRequest?
     @State private var showsProfile = false
     @State private var showsArchive = false
-    /// Sections the owner folded away. Done starts folded.
-    @AppStorage("tasks.collapsed") private var collapsedRaw = TaskSection.done.rawValue
+    /// Which list shows. Remembered between launches.
+    @AppStorage("tasks.scope") private var scope = TaskScope.steward
+    /// Sections the owner folded away, per list. Done starts folded in both.
+    @AppStorage("tasks.folded") private var foldedRaw = "mine.done,steward.done"
     /// Sections showing every row, past the first few.
-    @State private var expandedFully: Set<TaskSection> = []
+    @State private var expandedFully: Set<String> = []
 
     /// Rows a section shows before "Show more".
     private static let rowLimit = 5
-    /// Search appears once the list is long enough to need it.
-    private static let searchThreshold = 12
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -37,8 +37,7 @@ struct TasksView: View {
                         OwnerTaskDetail(id: id)
                     }
                 }
-                .navigationDestination(isPresented: $showsArchive) { ArchiveView() }
-                .modifier(SearchWhenLong(query: $model.query, enabled: model.totalCount >= Self.searchThreshold))
+                .navigationDestination(isPresented: $showsArchive) { ArchiveView(scope: scope) }
                 .overlay(alignment: .bottom) { UndoToast() }
         }
         .environment(model)
@@ -59,8 +58,9 @@ struct TasksView: View {
                 .accessibilityLabel("Your profile")
         }
         ToolbarItem(placement: .topBarTrailing) {
-            Button { adding = AddRequest() } label: { Image(systemName: "plus") }
-                .accessibilityLabel("New task")
+            // The plus adds to the list you're looking at.
+            Button { adding = AddRequest(doer: scope == .steward ? .steward : .me) } label: { Image(systemName: "plus") }
+                .accessibilityLabel(scope == .steward ? "Ask Steward" : "New task")
         }
     }
 
@@ -83,42 +83,17 @@ struct TasksView: View {
                     }
                     .listRowBackground(Palette.row)
                 }
-                if let calm = calmLine {
-                    Label(calm, systemImage: "checkmark.circle")
-                        .font(.subheadline)
-                        .foregroundStyle(Palette.muted)
+                Section {
+                    ScopePicker(scope: $scope)
                         .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
+                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                 }
-                section(.needsYou, model.needsYou)
-                section(.yours, model.yours, alwaysShown: model.query.isEmpty) {
-                    Button { adding = AddRequest() } label: {
-                        Label("New Task", systemImage: "plus")
-                            .font(.body)
-                            .foregroundStyle(Palette.orangeText)
-                            .frame(minHeight: 32)
-                    }
+                switch scope {
+                case .steward: stewardList
+                case .mine: mineList
                 }
-                section(.stewards, model.stewards, footer: model.canAct ? nil : "Steward isn't connected yet, so these are paused.")
-                section(.done, model.done, footer: model.done.isEmpty ? nil : "Done tasks move to the archive after 30 days.") {
-                    if !model.archived.isEmpty {
-                        Button { showsArchive = true } label: {
-                            HStack {
-                                Label("Archive", systemImage: "archivebox")
-                                Spacer()
-                                Text("\(model.archived.count)").monospacedDigit().foregroundStyle(Palette.muted)
-                                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Palette.muted)
-                            }
-                            .foregroundStyle(Palette.ink)
-                        }
-                    }
-                }
-                if !model.query.isEmpty, noMatches {
-                    Text("No tasks match “\(model.query)”.")
-                        .font(.subheadline)
-                        .foregroundStyle(Palette.muted)
-                        .frame(maxWidth: .infinity)
-                        .listRowBackground(Color.clear)
+                if !model.query.isEmpty, model.matchCount(in: scope) == 0 {
+                    noMatches
                 }
                 if model.isSample {
                     Text("Sample tasks: nothing here is real.")
@@ -132,33 +107,130 @@ struct TasksView: View {
             .listSectionSpacing(20)
             .scrollContentBackground(.hidden)
             .refreshable { model.reload() }
-            .animation(.snappy(duration: 0.25), value: collapsedRaw)
+            .animation(.snappy(duration: 0.25), value: foldedRaw)
+            // Always there once you have tasks, so the layout never jumps.
+            .searchable(text: $model.query, prompt: scope == .steward ? "Search Steward's tasks" : "Search your tasks")
+        }
+    }
+
+    // MARK: Lists
+
+    @ViewBuilder
+    private var stewardList: some View {
+        if model.query.isEmpty, !model.hasItems(in: .steward) {
+            ListEmpty(
+                title: "Nothing with Steward",
+                message: "Hand Steward anything: a subscription to cancel, a refund to chase, a trip to plan.",
+                action: "Ask Steward"
+            ) { adding = AddRequest(doer: .steward) }
+        } else {
+            if let calm = calmLine {
+                Label(calm, systemImage: "checkmark.circle")
+                    .font(.subheadline)
+                    .foregroundStyle(Palette.muted)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
+            }
+            section(.needsYou, model.needsYou)
+            section(.backToYou, model.handedBack)
+            section(.stewards, model.stewards, footer: model.canAct ? nil : "Steward isn't connected yet, so these are paused.")
+            doneSection
+        }
+    }
+
+    @ViewBuilder
+    private var mineList: some View {
+        // Your list never hides that Steward is waiting on you.
+        if model.query.isEmpty, model.needsYouCount > 0 {
+            Section {
+                Button { scope = .steward } label: {
+                    HStack(spacing: 12) {
+                        StewardAvatar(size: 28, blinks: false, neutral: true)
+                        Text(model.needsYouCount == 1 ? "Steward needs you on 1 task" : "Steward needs you on \(model.needsYouCount) tasks")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Palette.ink)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Palette.muted)
+                    }
+                    .frame(minHeight: 32)
+                }
+                .accessibilityHint("Shows Steward's list")
+            }
+            .listRowBackground(Palette.row)
+        }
+        section(.yours, model.mine, alwaysShown: model.query.isEmpty) {
+            Button { adding = AddRequest() } label: {
+                Label("New Task", systemImage: "plus")
+                    .font(.body)
+                    .foregroundStyle(Palette.orangeText)
+                    .frame(minHeight: 32)
+            }
+        }
+        doneSection
+    }
+
+    /// Done for the list showing, with the way into its archive.
+    private var doneSection: some View {
+        let done = model.done.filter(scope.contains)
+        let archived = model.archived.filter(scope.contains)
+        return section(.done, done, footer: done.isEmpty ? nil : "Done tasks move to the archive after 30 days.") {
+            if !archived.isEmpty {
+                Button { showsArchive = true } label: {
+                    HStack {
+                        Label("Archive", systemImage: "archivebox")
+                        Spacer()
+                        Text("\(archived.count)").monospacedDigit().foregroundStyle(Palette.muted)
+                        Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Palette.muted)
+                    }
+                    .foregroundStyle(Palette.ink)
+                }
+            }
         }
     }
 
     /// One reassuring line when Steward isn't waiting on you.
     private var calmLine: String? {
-        guard model.query.isEmpty, model.needsYou.isEmpty, !model.couldNotRead else { return nil }
+        guard model.query.isEmpty, model.needsYou.isEmpty, model.handedBack.isEmpty, !model.couldNotRead else { return nil }
         let onIt = model.stewards.count
-        if onIt > 0 { return "Nothing needs you. Steward has \(onIt) on the go." }
-        if model.yours.isEmpty { return "All clear." }
-        return "Nothing needs you from Steward."
+        return onIt > 0 ? "Nothing needs you. Steward has \(onIt) on the go." : "Nothing needs you."
     }
 
-    private var noMatches: Bool {
-        model.needsYou.isEmpty && model.yours.isEmpty && model.stewards.isEmpty && model.done.isEmpty
+    /// No match here; if the other list has some, one tap goes there.
+    @ViewBuilder
+    private var noMatches: some View {
+        let other: TaskScope = scope == .steward ? .mine : .steward
+        let elsewhere = model.matchCount(in: other)
+        VStack(spacing: 10) {
+            Text("No tasks match “\(model.query)” in \(scope.title).")
+                .font(.subheadline)
+                .foregroundStyle(Palette.muted)
+                .multilineTextAlignment(.center)
+            if elsewhere > 0 {
+                Button(elsewhere == 1 ? "Show 1 in \(other.title)" : "Show \(elsewhere) in \(other.title)") { scope = other }
+                    .buttonStyle(.bordered)
+                    .tint(Palette.ink)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .listRowBackground(Color.clear)
     }
 
     // MARK: Sections
 
-    private var collapsed: Set<TaskSection> {
-        Set(collapsedRaw.split(separator: ",").compactMap { TaskSection(rawValue: String($0)) })
+    private var folded: Set<String> {
+        Set(foldedRaw.split(separator: ",").map(String.init))
     }
 
+    /// Folding is per list, so Done can stay open in one and shut in the other.
+    private func key(_ section: TaskSection) -> String { "\(scope.rawValue).\(section.rawValue)" }
+
     private func toggle(_ section: TaskSection) {
-        var set = collapsed
-        if set.contains(section) { set.remove(section) } else { set.insert(section) }
-        collapsedRaw = set.map(\.rawValue).sorted().joined(separator: ",")
+        var set = folded
+        let key = key(section)
+        if set.contains(key) { set.remove(key) } else { set.insert(key) }
+        foldedRaw = set.sorted().joined(separator: ",")
     }
 
     @ViewBuilder
@@ -169,27 +241,28 @@ struct TasksView: View {
     ) -> some View {
         if !items.isEmpty || alwaysShown {
             // While searching, every match shows.
-            let folded = collapsed.contains(kind) && model.query.isEmpty
-            let full = expandedFully.contains(kind) || !model.query.isEmpty
+            let isFolded = folded.contains(key(kind)) && model.query.isEmpty
+            let full = expandedFully.contains(key(kind)) || !model.query.isEmpty
             let shown = full ? items : Array(items.prefix(Self.rowLimit))
             Section {
-                if !folded {
+                if !isFolded {
                     ForEach(shown) { item in
-                        NavigationLink(value: item.id) { TaskRow(item: item) }
+                        // In your own list every row is yours, so the avatar says nothing.
+                        NavigationLink(value: item.id) { TaskRow(item: item, showsAvatar: scope == .steward) }
                             .modifier(TaskActions(item: item, handToSteward: handToSteward))
                     }
                     if items.count > shown.count {
                         Button("Show \(items.count - shown.count) More") {
-                            withAnimation(.snappy) { _ = expandedFully.insert(kind) }
+                            withAnimation(.snappy) { _ = expandedFully.insert(key(kind)) }
                         }
                         .foregroundStyle(Palette.orangeText)
                     }
                     trailing()
                 }
             } header: {
-                SectionHeader(title: kind.title, count: items.count, folded: folded) { toggle(kind) }
+                SectionHeader(title: kind.title, count: items.count, folded: isFolded) { toggle(kind) }
             } footer: {
-                if let footer, !folded { Text(footer) }
+                if let footer, !isFolded { Text(footer) }
             }
             .listRowBackground(Palette.row)
         }
@@ -201,15 +274,68 @@ struct TasksView: View {
 }
 
 enum TaskSection: String, Hashable {
-    case needsYou, yours, stewards, done
+    case needsYou, backToYou, stewards, yours, done
 
     var title: String {
         switch self {
         case .needsYou: "Needs you"
-        case .yours: "Yours"
+        case .backToYou: "Back with you"
         case .stewards: "Steward is on it"
+        case .yours: "To do"
         case .done: "Done"
         }
+    }
+}
+
+/// The switch between Steward's list and yours, first thing under the title.
+/// Steward's side carries a count while it waits on you, like the tab badge.
+private struct ScopePicker: View {
+    @Binding var scope: TaskScope
+
+    @Environment(TasksModel.self) private var model
+
+    var body: some View {
+        Picker("List", selection: $scope) {
+            ForEach(TaskScope.allCases) { scope in
+                Text(label(scope)).tag(scope)
+            }
+        }
+        .pickerStyle(.segmented)
+        .controlSize(.large)
+        .sensoryFeedback(.selection, trigger: scope)
+    }
+
+    private func label(_ scope: TaskScope) -> String {
+        guard scope == .steward, model.needsYouCount > 0 else { return scope.title }
+        return "\(scope.title) · \(model.needsYouCount)"
+    }
+}
+
+/// One list is empty while the other isn't: say so, and offer the way in.
+private struct ListEmpty: View {
+    let title: String
+    let message: String
+    let action: String
+    let perform: () -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(Palette.ink)
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(Palette.muted)
+                .multilineTextAlignment(.center)
+            Button(action: perform) { Text(action) }
+                .buttonStyle(.borderedProminent)
+                .tint(Palette.orange)
+                .foregroundStyle(Palette.onOrange)
+                .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 32)
+        .listRowBackground(Color.clear)
     }
 }
 
@@ -250,6 +376,7 @@ private struct SectionHeader: View {
 /// middle, and on your own tasks a circle to tick it off.
 struct TaskRow: View {
     let item: TaskItem
+    var showsAvatar = true
 
     @Environment(TasksModel.self) private var model
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -259,7 +386,7 @@ struct TaskRow: View {
             if typeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
-                        TaskAvatar(item: item)
+                        if showsAvatar { TaskAvatar(item: item) }
                         Spacer()
                         trailing
                     }
@@ -267,7 +394,7 @@ struct TaskRow: View {
                 }
             } else {
                 HStack(spacing: 12) {
-                    TaskAvatar(item: item)
+                    if showsAvatar { TaskAvatar(item: item) }
                     words.frame(maxWidth: .infinity, alignment: .leading)
                     trailing
                 }
@@ -277,6 +404,22 @@ struct TaskRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(item.title)
         .accessibilityValue(accessibilityValue)
+        // Combining the row hides the tick circle from VoiceOver; offer it as an action.
+        .accessibilityActions {
+            if let tick { Button(tick.label, action: tick.run) }
+        }
+    }
+
+    /// What the tick circle does on this row, if it has one.
+    private var tick: (label: String, run: () -> Void)? {
+        switch item {
+        case .own(let task):
+            return (task.isDone ? "Mark not done" : "Mark done", { model.setDone(task.id, !task.isDone) })
+        case .steward(let task):
+            return TaskStatus(of: task) == .yours ? ("Mark done", { model.markTaskDone(task.id) }) : nil
+        case .errand(let file):
+            return TaskStatus(of: file) == .yours ? ("Mark done", { model.markDone(file.id) }) : nil
+        }
     }
 
     private var words: some View {
@@ -377,9 +520,9 @@ struct TaskRow: View {
     }
 }
 
-/// Whose move it is. You: your photo or initials. Steward: the cat. An errand
-/// that waits on you shows you, with a small cat for whose errand it is, and
-/// an orange ring, the one place orange appears in the list.
+/// Whose move it is. You: your photo or initials. Steward: the cat. Steward
+/// asking you something: the cat in an orange ring. Handed back to you: you,
+/// with a small cat for whose errand it was.
 struct TaskAvatar: View {
     let item: TaskItem
     var size: CGFloat = 36
@@ -405,8 +548,7 @@ struct TaskAvatar: View {
     private func face(_ status: TaskStatus, turning: Bool) -> some View {
         switch status {
         case .needsYou:
-            OwnerAvatar(size: size)
-                .overlay(alignment: .bottomTrailing) { catBadge }
+            StewardAvatar(size: size, blinks: false, neutral: true)
                 .background { Circle().strokeBorder(Palette.orange, lineWidth: 2).padding(-4) }
         case .yours:
             OwnerAvatar(size: size)
@@ -622,19 +764,6 @@ private struct UndoToast: View {
     }
 }
 
-private struct SearchWhenLong: ViewModifier {
-    @Binding var query: String
-    let enabled: Bool
-
-    func body(content: Content) -> some View {
-        if enabled {
-            content.searchable(text: $query, prompt: "Search tasks")
-        } else {
-            content
-        }
-    }
-}
-
 // MARK: Empty
 
 /// First run: nothing yet. Two ways in, and three errands to start from.
@@ -814,18 +943,7 @@ enum ErrandKind {
         }
     }
 
-    /// The row's background.
-    var wash: Color {
-        switch self {
-        case .cancel: Palette.dynamic(light: 0xEBF1FB, dark: 0x151C29)
-        case .dispute: Palette.dynamic(light: 0xFBEEF0, dark: 0x27181C)
-        case .refund: Palette.dynamic(light: 0xEBF6EE, dark: 0x14221A)
-        case .complain: Palette.dynamic(light: 0xF2EEFA, dark: 0x1D1829)
-        case .other: Palette.stewardBubble
-        }
-    }
-
-    /// The icon tile, a step deeper than the wash.
+    /// The icon tile.
     var tile: Color {
         switch self {
         case .cancel: Palette.dynamic(light: 0xD4E1F7, dark: 0x23314B)

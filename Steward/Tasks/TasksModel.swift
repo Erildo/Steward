@@ -32,6 +32,25 @@ enum TaskItem: Identifiable {
     }
 }
 
+/// Which list Tasks shows: what the owner handed to Steward, or their own to-dos.
+enum TaskScope: String, CaseIterable, Identifiable {
+    case steward, mine
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .steward: "Steward"
+        case .mine: "Mine"
+        }
+    }
+
+    func contains(_ item: TaskItem) -> Bool {
+        if case .own = item { return self == .mine }
+        return self == .steward
+    }
+}
+
 /// The Tasks tab: the owner's own to-dos and Steward's errands, grouped by
 /// who acts next. Errands move forward through the runner; the owner's own
 /// moves on them (take over, stop, mark done) are logged in the case.
@@ -103,9 +122,9 @@ final class TasksModel {
         return cases.filter { !carried.contains($0.id) }
     }
 
-    /// The owner's own to-dos, and errands that came back to them.
-    var yours: [TaskItem] {
-        let own = ownTasks.filter { !$0.isDone }
+    /// The owner's own open to-dos, dated ones first, soonest first.
+    var mine: [TaskItem] {
+        ownTasks.filter { !$0.isDone }
             .sorted { a, b in
                 switch (a.due, b.due) {
                 case let (x?, y?): x < y
@@ -115,10 +134,31 @@ final class TasksModel {
                 }
             }
             .map(TaskItem.own)
-        let handedBack = (listedCases.filter { TaskStatus(of: $0) == .yours }.map(TaskItem.errand)
+            .filter(matches)
+    }
+
+    /// Steward's errands and tasks that came back to the owner to finish.
+    var handedBack: [TaskItem] {
+        (listedCases.filter { TaskStatus(of: $0) == .yours }.map(TaskItem.errand)
             + stewardTasks.filter { TaskStatus(of: $0) == .yours }.map(TaskItem.steward))
             .sorted { lastActivity($0) > lastActivity($1) }
-        return (handedBack + own).filter(matches)
+            .filter(matches)
+    }
+
+    /// Everything in a scope that matches the search, across sections.
+    func matchCount(in scope: TaskScope) -> Int {
+        switch scope {
+        case .mine: mine.count + done.filter(scope.contains).count
+        case .steward: needsYou.count + handedBack.count + stewards.count + done.filter(scope.contains).count
+        }
+    }
+
+    /// Whether a scope holds anything at all, search aside.
+    func hasItems(in scope: TaskScope) -> Bool {
+        switch scope {
+        case .mine: !ownTasks.isEmpty
+        case .steward: !listedCases.isEmpty || !stewardTasks.isEmpty
+        }
     }
 
     /// Errands Steward is working on or waiting on the company for, soonest wake first.

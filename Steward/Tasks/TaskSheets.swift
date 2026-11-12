@@ -200,16 +200,20 @@ struct OwnerTaskDetail: View {
 
 /// Tasks finished more than 30 days ago.
 struct ArchiveView: View {
+    let scope: TaskScope
+
     @Environment(TasksModel.self) private var model
+
+    private var archived: [TaskItem] { model.archived.filter(scope.contains) }
 
     var body: some View {
         Group {
-            if model.archived.isEmpty {
+            if archived.isEmpty {
                 ContentUnavailableView("Nothing archived", systemImage: "archivebox",
                                        description: Text("Done tasks move here after 30 days."))
             } else {
                 List {
-                    ForEach(model.archived) { item in
+                    ForEach(archived) { item in
                         NavigationLink(value: item.id) { TaskRow(item: item) }
                             .swipeActions {
                                 if case .own(let task) = item {
