@@ -16,8 +16,7 @@ struct RootTabView: View {
                                 message: "What Steward notices about your errands will appear here.")
             }
             Tab("Tasks", systemImage: "checkmark.square") {
-                PlaceholderView(title: "Tasks", systemImage: "checkmark.square",
-                                message: "Errands in progress will appear here.")
+                TasksView()
             }
             Tab("Apps", systemImage: "square.grid.2x2") {
                 PlaceholderView(title: "Connected Apps", systemImage: "square.grid.2x2",

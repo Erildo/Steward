@@ -106,6 +106,12 @@ public struct CaseFile: Codable, Identifiable, Sendable, Equatable {
         public var date: Date
         public var kind: String
         public var detail: String
+
+        public init(date: Date, kind: String, detail: String) {
+            self.date = date
+            self.kind = kind
+            self.detail = detail
+        }
     }
 
     /// Where the case is. Every waiting state names exactly what wakes it.
@@ -126,6 +132,13 @@ public struct CaseFile: Codable, Identifiable, Sendable, Equatable {
         public var summary: String
         public var evidence: String
         public var date: Date
+
+        public init(status: Status, summary: String, evidence: String, date: Date) {
+            self.status = status
+            self.summary = summary
+            self.evidence = evidence
+            self.date = date
+        }
     }
 
     mutating func log(_ kind: String, _ detail: String, at date: Date) {

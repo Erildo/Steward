@@ -14,7 +14,7 @@ enum Palette {
     static let bubbleRadius: CGFloat = 19
     static let cardRadius: CGFloat = 16
 
-    private static func dynamic(light: UInt32, dark: UInt32) -> Color {
+    static func dynamic(light: UInt32, dark: UInt32) -> Color {
         Color(uiColor: UIColor { traits in
             let hex = traits.userInterfaceStyle == .dark ? dark : light
             return UIColor(
