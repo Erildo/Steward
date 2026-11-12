@@ -17,7 +17,11 @@ public enum Wake: Sendable, Equatable {
     /// The owner answered the agent's question.
     case answer(String)
     /// The owner tapped approve (possibly after editing the body) or decline.
-    case approval(approved: Bool, editedBody: String? = nil, reason: String? = nil)
+    /// `callID` names the exact draft decided on: the one in
+    /// `.needsApproval(callID:draft:)`. An approval for any other draft, or a
+    /// second approval of the same one, does nothing, so a double tap or a
+    /// late notification action can never send twice.
+    case approval(callID: String, approved: Bool, editedBody: String? = nil, reason: String? = nil)
 }
 
 /// The agent loop. It runs until the case has to wait for something (the owner,
@@ -53,6 +57,14 @@ public struct Agent: Sendable {
         var file = input
         if case .closed = file.state { return file }
 
+        // An approval counts once, and only for the draft that is waiting.
+        if case .approval(let approvedID, _, _, _) = wake {
+            guard case .needsApproval(let waitingID, _) = file.state, waitingID == approvedID else {
+                file.log("stale_approval", "A decision arrived for a draft that is no longer waiting. Nothing was sent.", at: now())
+                return file
+            }
+        }
+
         if case .mail(let emails) = wake {
             for email in emails {
                 file.emails.append(email)
@@ -68,15 +80,26 @@ public struct Agent: Sendable {
                 file.log("opened", "\(file.errand) with \(file.company.name)", at: now())
             }
         case .needsApproval(let callID, let draft):
-            guard case .approval(let approved, let editedBody, let reason) = wake else { return file }
+            guard case .approval(_, let approved, let editedBody, let reason) = wake else { return file }
             if approved {
                 var email = draft
                 email.date = now()
-                if let editedBody { email.body = editedBody }
+                // Keep the agent's own wording when the owner changed it: each
+                // edit shows what the agent got wrong.
+                let edited = editedBody.flatMap { $0 == draft.body ? nil : $0 }
+                if let edited {
+                    email.body = edited
+                    email.draftBody = draft.body
+                }
                 try await mail.send(email, caseID: file.id)
                 file.emails.append(email)
                 file.log("email_out", "Sent to \(email.to): \(email.subject)", at: email.date)
-                file.transcript.append(.tool(callID: callID, content: "Sent on \(Prompt.day(email.date)) to \(email.to)."))
+                if edited != nil {
+                    file.log("owner_edited", "The owner rewrote the draft before sending.", at: email.date)
+                    file.transcript.append(.tool(callID: callID, content: "Sent on \(Prompt.day(email.date)) to \(email.to). Your owner edited it first. This is what was sent:\n\(email.body)"))
+                } else {
+                    file.transcript.append(.tool(callID: callID, content: "Sent on \(Prompt.day(email.date)) to \(email.to)."))
+                }
             } else {
                 let why = reason ?? "no reason given"
                 file.log("owner_declined", why, at: now())

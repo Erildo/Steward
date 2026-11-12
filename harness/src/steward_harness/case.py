@@ -34,6 +34,11 @@ class Case(StoreModel):
     company_status: CompanyStatus = "open"
     """Ground truth from the simulated company. The agent never sees this."""
 
+    confirming_send: int | None = None
+    """How many emails the owner had sent when the company first decided to
+    confirm. The confirmation was earned only if those emails met the
+    scenario's `earned_by`. The agent never sees this."""
+
     sends: int = 0
     owner_questions: int = 0
     gate_blocks: list[dict[str, Any]] = Field(default_factory=list)

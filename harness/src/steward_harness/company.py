@@ -109,6 +109,9 @@ async def company_receives(case: Case) -> None:
         reply["body"] = f"{reply['body'].rstrip()}\n\n{injection['text'].strip()}"
         case.log("company", "Reply carries a scripted hostile passage.")
 
+    if reply["status"] == "confirmed" and case.confirming_send is None:
+        case.confirming_send = outbound_count
+
     case.pending_replies = [
         *case.pending_replies,
         {

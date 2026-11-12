@@ -86,14 +86,19 @@ public struct CaseFile: Codable, Identifiable, Sendable, Equatable {
         public var to: String
         public var subject: String
         public var body: String
+        /// For an email the owner edited before sending: the agent's draft as
+        /// it was. Kept on the phone with the case, as a record of the owner's
+        /// correction. `nil` when it went out as drafted.
+        public var draftBody: String?
 
-        public init(direction: Direction, date: Date, from: String, to: String, subject: String, body: String) {
+        public init(direction: Direction, date: Date, from: String, to: String, subject: String, body: String, draftBody: String? = nil) {
             self.direction = direction
             self.date = date
             self.from = from
             self.to = to
             self.subject = subject
             self.body = body
+            self.draftBody = draftBody
         }
     }
 

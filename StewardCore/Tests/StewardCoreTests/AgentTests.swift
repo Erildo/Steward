@@ -60,7 +60,7 @@ func agent(_ turns: [AssistantTurn], _ mail: SentMail, _ clock: Clock) -> Agent 
     #expect(draft.from == "case-7f3a@steward.example")
     #expect(await mail.sent.isEmpty, "nothing goes out before the owner taps")
 
-    file = try await steward.wake(file, with: .approval(approved: true))
+    file = try await steward.wake(file, with: .approval(callID: "1", approved: true))
     guard case .waitingForReply = file.state else { Issue.record("expected waiting, got \(file.state)"); return }
     #expect(await mail.sent.count == 1)
 
@@ -77,9 +77,85 @@ func agent(_ turns: [AssistantTurn], _ mail: SentMail, _ clock: Clock) -> Agent 
         call("1", "send_email", ["to": .string("kundenservice@fitwerk.example"), "subject": .string("Kündigung"), "body": .string("Draft")]),
         call("2", "close_case", ["status": .string("needs_owner"), "summary": .string("Sent."), "evidence": .string("")]),
     ], mail, clock)
-    let file = try await steward.wake(try await steward.wake(gymCase(), with: .start), with: .approval(approved: true, editedBody: "Edited by Lena"))
+    let file = try await steward.wake(try await steward.wake(gymCase(), with: .start), with: .approval(callID: "1", approved: true, editedBody: "Edited by Lena"))
     #expect(await mail.sent.first?.body == "Edited by Lena")
     #expect(file.state == .closed)
+    // The agent's own wording is kept as the record of the correction, and the
+    // agent is told what actually went out.
+    #expect(file.emails.first?.body == "Edited by Lena")
+    #expect(file.emails.first?.draftBody == "Draft")
+    #expect(file.events.contains { $0.kind == "owner_edited" })
+    #expect(file.transcript.contains { if case .tool("1", let content) = $0 { content.contains("Edited by Lena") } else { false } })
+}
+
+@Test func unchangedBodyIsNotRecordedAsAnEdit() async throws {
+    let mail = SentMail(), clock = Clock()
+    let steward = agent([
+        call("1", "send_email", ["to": .string("kundenservice@fitwerk.example"), "subject": .string("Kündigung"), "body": .string("Draft")]),
+        call("2", "close_case", ["status": .string("needs_owner"), "summary": .string("Sent."), "evidence": .string("")]),
+    ], mail, clock)
+    let file = try await steward.wake(try await steward.wake(gymCase(), with: .start), with: .approval(callID: "1", approved: true, editedBody: "Draft"))
+    #expect(file.emails.first?.draftBody == nil)
+    #expect(!file.events.contains { $0.kind == "owner_edited" })
+}
+
+@Test func anApprovalSendsOnceEvenIfDeliveredTwice() async throws {
+    let mail = SentMail(), clock = Clock()
+    let steward = agent([
+        call("1", "send_email", ["to": .string("kundenservice@fitwerk.example"), "subject": .string("Kündigung"), "body": .string("Bitte kündigen.")]),
+        call("2", "wait_for_reply", ["max_days": .number(7)]),
+    ], mail, clock)
+    var file = try await steward.wake(gymCase(), with: .start)
+    file = try await steward.wake(file, with: .approval(callID: "1", approved: true))
+    #expect(await mail.sent.count == 1)
+
+    // The same tap delivered again (a notification action after the in-app tap).
+    let waiting = file.state
+    file = try await steward.wake(file, with: .approval(callID: "1", approved: true))
+    #expect(await mail.sent.count == 1)
+    #expect(file.state == waiting, "a stale approval changes nothing but the log")
+    #expect(file.events.last?.kind == "stale_approval")
+}
+
+@Test func anApprovalForAnotherDraftIsIgnored() async throws {
+    let mail = SentMail(), clock = Clock()
+    let steward = agent([
+        call("1", "send_email", ["to": .string("kundenservice@fitwerk.example"), "subject": .string("Kündigung"), "body": .string("Bitte kündigen.")]),
+    ], mail, clock)
+    let file = try await steward.wake(try await steward.wake(gymCase(), with: .start), with: .approval(callID: "old-draft", approved: true))
+    #expect(await mail.sent.isEmpty)
+    guard case .needsApproval(let callID, _) = file.state else { Issue.record("still waiting for this draft's approval"); return }
+    #expect(callID == "1")
+}
+
+@Test func wakesOnOneCaseNeverOverlap() async throws {
+    actor Tracker {
+        var running = 0, most = 0, order: [Int] = []
+        func enter() { running += 1; most = max(most, running) }
+        func leave(_ n: Int) { running -= 1; order.append(n) }
+    }
+    let queue = WakeQueue(), tracker = Tracker(), id = UUID()
+    try await withThrowingTaskGroup(of: Void.self) { group in
+        for n in 0..<5 {
+            group.addTask {
+                try await queue.run(id) {
+                    await tracker.enter()
+                    try await Task.sleep(for: .milliseconds(10))
+                    await tracker.leave(n)
+                }
+            }
+        }
+        try await group.waitForAll()
+    }
+    #expect(await tracker.most == 1)
+    #expect(await tracker.order.count == 5)
+}
+
+@Test func aFailedWakeDoesNotBlockTheNextOne() async throws {
+    struct Boom: Error {}
+    let queue = WakeQueue(), id = UUID()
+    await #expect(throws: Boom.self) { try await queue.run(id) { throw Boom() } }
+    #expect(try await queue.run(id) { 42 } == 42)
 }
 
 @Test func declinedDraftIsNeverSent() async throws {
@@ -88,7 +164,7 @@ func agent(_ turns: [AssistantTurn], _ mail: SentMail, _ clock: Clock) -> Agent 
         call("1", "send_email", ["to": .string("kundenservice@fitwerk.example"), "subject": .string("Offer"), "body": .string("I'll take the discount.")]),
         call("2", "close_case", ["status": .string("needs_owner"), "summary": .string("Owner declined."), "evidence": .string("")]),
     ], mail, clock)
-    let file = try await steward.wake(try await steward.wake(gymCase(), with: .start), with: .approval(approved: false, reason: "I said cancel"))
+    let file = try await steward.wake(try await steward.wake(gymCase(), with: .start), with: .approval(callID: "1", approved: false, reason: "I said cancel"))
     #expect(await mail.sent.isEmpty)
     #expect(file.transcript.contains(.tool(callID: "1", content: "The owner said no: I said cancel. Nothing was sent.")))
 }
@@ -141,7 +217,7 @@ func agent(_ turns: [AssistantTurn], _ mail: SentMail, _ clock: Clock) -> Agent 
     guard case .needsApproval = file.state else { Issue.record("mail must not skip the approval"); return }
     #expect(file.inbox.count == 1)
 
-    file = try await steward.wake(file, with: .approval(approved: true))
+    file = try await steward.wake(file, with: .approval(callID: "1", approved: true))
     #expect(file.state == .closed, "the queued reply is delivered at once, no waiting")
     #expect(file.inbox.isEmpty)
 }
@@ -166,7 +242,7 @@ func agent(_ turns: [AssistantTurn], _ mail: SentMail, _ clock: Clock) -> Agent 
 
     var saved = asking
     do {
-        _ = try await steward.wake(asking, with: .approval(approved: true))
+        _ = try await steward.wake(asking, with: .approval(callID: "1", approved: true))
         Issue.record("expected the wake to fail")
     } catch let failed as Agent.WakeFailed {
         #expect(failed.underlying is ScriptedModelClient.ScriptExhausted)

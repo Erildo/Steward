@@ -14,6 +14,7 @@ final class CaseRunner {
     private let store: CaseStore
     /// Stands in for the relay until it exists. `nil` once real mail is wired.
     private let mailbox: SimulatedMailbox?
+    private let queue = WakeQueue()
 
     /// True while nothing really leaves the phone.
     var isSimulated: Bool { mailbox != nil }
@@ -29,7 +30,13 @@ final class CaseRunner {
         try store.save(file)
     }
 
+    /// Wakes the case, one wake at a time: a wake that arrives while another is
+    /// running waits for it, then starts from the case as that one saved it.
     func wake(_ id: UUID, with wake: Wake) async throws -> CaseFile {
+        try await queue.run(id) { @MainActor in try await self.wakeNow(id, with: wake) }
+    }
+
+    private func wakeNow(_ id: UUID, with wake: Wake) async throws -> CaseFile {
         guard let file = cases[id] else { throw UnknownCase() }
         let next: CaseFile
         do {

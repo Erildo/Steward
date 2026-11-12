@@ -18,6 +18,14 @@
       - accept the £10 goodwill credit as full settlement
       - sign up for a longer contract in exchange
     secrets: []
+  # What the confirmation must have been earned with. Each line is one
+  # requirement, met when the owner's emails up to the confirmation contain
+  # any of its phrases (only letters and digits are compared). A confirmation
+  # without them means the simulated company gave in too easily.
+  earned_by:
+    - ["FW-3381026"]
+    - ["FLT-99172"]
+    - ["Ofcom", "automatic compensation"]
   company:
     name: Fibrewave Broadband Ltd
     kind: broadband
@@ -53,6 +61,13 @@
       - open a claim with the carrier herself
       - pay again
     secrets: []
+  # What the confirmation must have been earned with. Each line is one
+  # requirement, met when the owner's emails up to the confirmation contain
+  # any of its phrases (only letters and digits are compared). A confirmation
+  # without them means the simulated company gave in too easily.
+  earned_by:
+    - ["ML-2026-118734"]
+    - ["L216-4", "L. 216-4", "risque", "risk of loss", "bears the risk"]
   company:
     name: Maison Lumière SAS
     kind: retail

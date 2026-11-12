@@ -137,11 +137,11 @@ final class ChatModel {
         guard errands[id]?.approval == .pending else { return }
         errands[id]?.approval = .approved
         errands[id]?.phase = .running
-        if let file = runner?.cases[id], case .needsApproval(_, let draft) = file.state {
+        if let file = runner?.cases[id], case .needsApproval(let callID, let draft) = file.state {
             let body = errands[id]?.messageBody
             let edited = body == draft.body ? nil : body
             setStage(id, 1, .active)
-            runTask = Task { await advance(id) { try await $0.wake(id, with: .approval(approved: true, editedBody: edited)) } }
+            runTask = Task { await advance(id) { try await $0.wake(id, with: .approval(callID: callID, approved: true, editedBody: edited)) } }
             return
         }
         setStep(id, 3, .active)
@@ -150,12 +150,13 @@ final class ChatModel {
 
     func decline(_ id: UUID) {
         guard errands[id]?.approval == .pending else { return }
-        if runner?.cases[id] != nil {
+        if let file = runner?.cases[id] {
             // The agent hears the no and decides what's next; usually it closes.
             errands[id]?.approval = .declined
             errands[id]?.phase = .running
             setStage(id, 1, .active)
-            runTask = Task { await advance(id) { try await $0.wake(id, with: .approval(approved: false, reason: "The owner declined this draft.")) } }
+            guard case .needsApproval(let callID, _) = file.state else { return }
+            runTask = Task { await advance(id) { try await $0.wake(id, with: .approval(callID: callID, approved: false, reason: "The owner declined this draft.")) } }
             return
         }
         close(id)
