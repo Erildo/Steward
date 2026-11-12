@@ -1,120 +1,721 @@
 import SwiftUI
 import StewardCore
 
-/// Every errand as a task, grouped by who acts next: you, Steward, or nobody.
+/// Your to-dos and Steward's errands in one list, grouped by who acts next:
+/// Steward waiting on you, yours, Steward's, and done.
 struct TasksView: View {
-    @State private var model = TasksModel.launch()
+    @Bindable var model: TasksModel
+
     @Environment(\.scenePhase) private var scenePhase
+    @State private var path: [UUID] = []
+    /// The add sheet, with what it opens with.
+    @State private var adding: AddRequest?
+    @State private var showsProfile = false
+    @State private var showsArchive = false
+    /// Sections the owner folded away. Done starts folded.
+    @AppStorage("tasks.collapsed") private var collapsedRaw = TaskSection.done.rawValue
+    /// Sections showing every row, past the first few.
+    @State private var expandedFully: Set<TaskSection> = []
+
+    /// Rows a section shows before "Show more".
+    private static let rowLimit = 5
+    /// Search appears once the list is long enough to need it.
+    private static let searchThreshold = 12
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             content
                 .background(Palette.ground)
                 .navigationTitle("Tasks")
+                .toolbar { toolbar }
                 .navigationDestination(for: UUID.self) { id in
-                    if let file = model.file(id) { CaseDetailView(file: file) }
+                    if let file = model.file(id) {
+                        CaseDetailView(file: file)
+                    } else if model.stewardTask(id) != nil {
+                        StewardTaskDetail(id: id)
+                    } else {
+                        OwnerTaskDetail(id: id)
+                    }
                 }
+                .navigationDestination(isPresented: $showsArchive) { ArchiveView() }
+                .modifier(SearchWhenLong(query: $model.query, enabled: model.totalCount >= Self.searchThreshold))
+                .overlay(alignment: .bottom) { UndoToast() }
         }
         .environment(model)
+        .sheet(item: $adding) { request in
+            AddTaskSheet(request: request) { id in path = [id] }
+        }
+        .sheet(isPresented: $showsProfile) { ProfileSheet() }
         .onAppear { model.reload() }
         .onChange(of: scenePhase) {
             if scenePhase == .active { model.reload() }
         }
     }
 
+    @ToolbarContentBuilder
+    private var toolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button { showsProfile = true } label: { OwnerAvatar(size: 30) }
+                .accessibilityLabel("Your profile")
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button { adding = AddRequest() } label: { Image(systemName: "plus") }
+                .accessibilityLabel("New task")
+        }
+    }
+
     @ViewBuilder
     private var content: some View {
-        if model.cases.isEmpty && !model.couldNotRead {
-            ContentUnavailableView(
-                "No errands yet",
-                systemImage: "checkmark.circle",
-                description: Text("Tell Steward what needs sorting in Chat. It shows up here, and stays until it's done.")
-            )
+        if model.isEmpty && !model.couldNotRead {
+            EmptyTasks(add: { adding = $0 })
         } else {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 28) {
-                    if model.couldNotRead {
-                        Label("Steward couldn't read some of your errands.", systemImage: "exclamationmark.triangle")
-                            .font(.subheadline)
-                            .foregroundStyle(Palette.muted)
+            List {
+                if model.couldNotRead {
+                    Section {
+                        HStack(spacing: 12) {
+                            Label("Steward couldn't read some of your tasks.", systemImage: "exclamationmark.triangle")
+                                .font(.subheadline)
+                                .foregroundStyle(Palette.ink)
+                            Spacer(minLength: 0)
+                            Button("Retry") { model.reload() }
+                                .buttonStyle(.bordered)
+                        }
                     }
-                    section("Needs you", model.needsYou)
-                    section("Steward is on it", model.onIt)
-                    section("Done", model.finished)
-                    if model.isSample {
-                        Text("Sample errands: nothing here is real.")
-                            .font(.caption)
-                            .foregroundStyle(Palette.muted)
-                            .frame(maxWidth: .infinity)
+                    .listRowBackground(Palette.row)
+                }
+                if let calm = calmLine {
+                    Label(calm, systemImage: "checkmark.circle")
+                        .font(.subheadline)
+                        .foregroundStyle(Palette.muted)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
+                }
+                section(.needsYou, model.needsYou)
+                section(.yours, model.yours, alwaysShown: model.query.isEmpty) {
+                    Button { adding = AddRequest() } label: {
+                        Label("New Task", systemImage: "plus")
+                            .font(.body)
+                            .foregroundStyle(Palette.orangeText)
+                            .frame(minHeight: 32)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 24)
+                section(.stewards, model.stewards, footer: model.canAct ? nil : "Steward isn't connected yet, so these are paused.")
+                section(.done, model.done, footer: model.done.isEmpty ? nil : "Done tasks move to the archive after 30 days.") {
+                    if !model.archived.isEmpty {
+                        Button { showsArchive = true } label: {
+                            HStack {
+                                Label("Archive", systemImage: "archivebox")
+                                Spacer()
+                                Text("\(model.archived.count)").monospacedDigit().foregroundStyle(Palette.muted)
+                                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Palette.muted)
+                            }
+                            .foregroundStyle(Palette.ink)
+                        }
+                    }
+                }
+                if !model.query.isEmpty, noMatches {
+                    Text("No tasks match “\(model.query)”.")
+                        .font(.subheadline)
+                        .foregroundStyle(Palette.muted)
+                        .frame(maxWidth: .infinity)
+                        .listRowBackground(Color.clear)
+                }
+                if model.isSample {
+                    Text("Sample tasks: nothing here is real.")
+                        .font(.caption)
+                        .foregroundStyle(Palette.muted)
+                        .frame(maxWidth: .infinity)
+                        .listRowBackground(Color.clear)
+                }
             }
+            .listStyle(.insetGrouped)
+            .listSectionSpacing(20)
+            .scrollContentBackground(.hidden)
             .refreshable { model.reload() }
+            .animation(.snappy(duration: 0.25), value: collapsedRaw)
+        }
+    }
+
+    /// One reassuring line when Steward isn't waiting on you.
+    private var calmLine: String? {
+        guard model.query.isEmpty, model.needsYou.isEmpty, !model.couldNotRead else { return nil }
+        let onIt = model.stewards.count
+        if onIt > 0 { return "Nothing needs you. Steward has \(onIt) on the go." }
+        if model.yours.isEmpty { return "All clear." }
+        return "Nothing needs you from Steward."
+    }
+
+    private var noMatches: Bool {
+        model.needsYou.isEmpty && model.yours.isEmpty && model.stewards.isEmpty && model.done.isEmpty
+    }
+
+    // MARK: Sections
+
+    private var collapsed: Set<TaskSection> {
+        Set(collapsedRaw.split(separator: ",").compactMap { TaskSection(rawValue: String($0)) })
+    }
+
+    private func toggle(_ section: TaskSection) {
+        var set = collapsed
+        if set.contains(section) { set.remove(section) } else { set.insert(section) }
+        collapsedRaw = set.map(\.rawValue).sorted().joined(separator: ",")
+    }
+
+    @ViewBuilder
+    private func section(
+        _ kind: TaskSection, _ items: [TaskItem],
+        alwaysShown: Bool = false, footer: String? = nil,
+        @ViewBuilder trailing: () -> some View = { EmptyView() }
+    ) -> some View {
+        if !items.isEmpty || alwaysShown {
+            // While searching, every match shows.
+            let folded = collapsed.contains(kind) && model.query.isEmpty
+            let full = expandedFully.contains(kind) || !model.query.isEmpty
+            let shown = full ? items : Array(items.prefix(Self.rowLimit))
+            Section {
+                if !folded {
+                    ForEach(shown) { item in
+                        NavigationLink(value: item.id) { TaskRow(item: item) }
+                            .modifier(TaskActions(item: item, handToSteward: handToSteward))
+                    }
+                    if items.count > shown.count {
+                        Button("Show \(items.count - shown.count) More") {
+                            withAnimation(.snappy) { _ = expandedFully.insert(kind) }
+                        }
+                        .foregroundStyle(Palette.orangeText)
+                    }
+                    trailing()
+                }
+            } header: {
+                SectionHeader(title: kind.title, count: items.count, folded: folded) { toggle(kind) }
+            } footer: {
+                if let footer, !folded { Text(footer) }
+            }
+            .listRowBackground(Palette.row)
+        }
+    }
+
+    private func handToSteward(_ task: OwnerTask) {
+        model.handToSteward(task.id)
+    }
+}
+
+enum TaskSection: String, Hashable {
+    case needsYou, yours, stewards, done
+
+    var title: String {
+        switch self {
+        case .needsYou: "Needs you"
+        case .yours: "Yours"
+        case .stewards: "Steward is on it"
+        case .done: "Done"
+        }
+    }
+}
+
+/// A section title you can tap to fold the section away.
+private struct SectionHeader: View {
+    let title: String
+    let count: Int
+    let folded: Bool
+    let toggle: () -> Void
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(title).font(.title3.weight(.semibold)).foregroundStyle(Palette.ink)
+                Text("\(count)").font(.subheadline.monospacedDigit()).foregroundStyle(Palette.muted)
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Palette.muted)
+                    .rotationEffect(.degrees(folded ? -90 : 0))
+            }
+            .contentShape(.rect)
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+        .textCase(nil)
+        .padding(.horizontal, -4)
+        .accessibilityLabel("\(title), \(count)")
+        .accessibilityValue(folded ? "Collapsed" : "Expanded")
+        .accessibilityHint(folded ? "Shows this section" : "Hides this section")
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
+// MARK: Rows
+
+/// One task: who acts next on the left, what it is and where it stands in the
+/// middle, and on your own tasks a circle to tick it off.
+struct TaskRow: View {
+    let item: TaskItem
+
+    @Environment(TasksModel.self) private var model
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        Group {
+            if typeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        TaskAvatar(item: item)
+                        Spacer()
+                        trailing
+                    }
+                    words
+                }
+            } else {
+                HStack(spacing: 12) {
+                    TaskAvatar(item: item)
+                    words.frame(maxWidth: .infinity, alignment: .leading)
+                    trailing
+                }
+            }
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(item.title)
+        .accessibilityValue(accessibilityValue)
+    }
+
+    private var words: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(item.title)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(isFinished ? Palette.muted : Palette.ink)
+                .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+            subtitle
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private var subtitle: some View {
+        if model.working.contains(item.id) {
+            Label { Text("Steward is on it…") } icon: { ProgressView().controlSize(.mini) }
+                .font(.subheadline)
+                .foregroundStyle(Palette.muted)
+        } else if let problem = model.problems[item.id] {
+            Label(problem, systemImage: "exclamationmark.triangle")
+                .font(.subheadline)
+                .foregroundStyle(Palette.orangeText)
+                .lineLimit(2)
+        } else if !line.isEmpty {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                if case .errand(let file) = item {
+                    Image(systemName: ErrandKind(of: file).symbol)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(isFinished ? Palette.muted : ErrandKind(of: file).deep)
+                        .accessibilityHidden(true)
+                }
+                Text(line)
+                    .font(.subheadline)
+                    .foregroundStyle(lineColor)
+                    .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+            }
         }
     }
 
     @ViewBuilder
-    private func section(_ title: String, _ files: [CaseFile]) -> some View {
-        if !files.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(title).font(.title3.weight(.semibold)).foregroundStyle(Palette.ink)
-                    Text("\(files.count)").font(.subheadline.monospacedDigit()).foregroundStyle(Palette.muted)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityAddTraits(.isHeader)
-                ForEach(files) { file in
-                    NavigationLink(value: file.id) { TaskRow(file: file) }
-                        .buttonStyle(TaskRowButtonStyle())
-                }
+    private var trailing: some View {
+        switch item {
+        case .own(let task):
+            CheckCircle(done: task.isDone) { model.setDone(task.id, !task.isDone) }
+        case .steward(let task):
+            switch TaskStatus(of: task) {
+            case .yours: CheckCircle(done: false) { model.markTaskDone(task.id) }
+            case .done: FinishedMark(done: true)
+            case .stopped: FinishedMark(done: false)
+            case .needsYou, .onIt: EmptyView()
+            }
+        case .errand(let file):
+            switch TaskStatus(of: file) {
+            case .yours: CheckCircle(done: false) { model.markDone(file.id) }
+            case .done: FinishedMark(done: true)
+            case .stopped: FinishedMark(done: false)
+            case .needsYou, .onIt: EmptyView()
             }
         }
     }
+
+    private var line: String {
+        switch item {
+        case .own(let task): task.statusLine
+        case .steward(let task): task.statusLine(connected: model.canWork)
+        case .errand(let file): file.statusLine
+        }
+    }
+
+    private var isFinished: Bool {
+        switch item {
+        case .own(let task): task.isDone
+        case .steward(let task): task.isFinished
+        case .errand(let file): [.done, .stopped].contains(TaskStatus(of: file))
+        }
+    }
+
+    private var lineColor: Color {
+        switch item {
+        case .own(let task): return task.isOverdue ? Palette.orangeText : Palette.muted
+        case .steward(let task):
+            return task.isOverdue || TaskStatus(of: task) == .needsYou ? Palette.orangeText : Palette.muted
+        case .errand(let file):
+            if file.isOverdue || TaskStatus(of: file) == .needsYou { return Palette.orangeText }
+            return Palette.muted
+        }
+    }
+
+    private var accessibilityValue: String {
+        let who: String
+        switch item {
+        case .own(let task): who = task.isDone ? "Your task, done" : "Your task"
+        case .steward(let task): who = "Steward's task, \(TaskStatus(of: task).accessibilityLabel)"
+        case .errand(let file): who = "Steward's errand, \(TaskStatus(of: file).accessibilityLabel)"
+        }
+        return line.isEmpty ? who : "\(who). \(line)"
+    }
 }
 
-/// One errand: its kind on the left, where it stands in the middle, and a
-/// circle on the right saying who acts next.
-struct TaskRow: View {
-    let file: CaseFile
+/// Whose move it is. You: your photo or initials. Steward: the cat. An errand
+/// that waits on you shows you, with a small cat for whose errand it is, and
+/// an orange ring, the one place orange appears in the list.
+struct TaskAvatar: View {
+    let item: TaskItem
+    var size: CGFloat = 36
+
+    @Environment(TasksModel.self) private var model
 
     var body: some View {
-        let kind = ErrandKind(of: file)
-        let status = TaskStatus(of: file)
-        let finished = status == .done || status == .stopped
-
-        HStack(spacing: 14) {
-            KindTile(kind: kind)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(file.title)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(Palette.ink)
-                    .lineLimit(2)
-                Text(file.statusLine)
-                    .font(.subheadline)
-                    .foregroundStyle(finished ? Palette.muted : kind.deep)
-                    .lineLimit(2)
+        ZStack {
+            switch item {
+            case .own(let task):
+                OwnerAvatar(size: size).opacity(task.isDone ? 0.5 : 1)
+            case .steward(let task):
+                face(TaskStatus(of: task), turning: model.canWork && !task.isOverdue)
+            case .errand(let file):
+                face(TaskStatus(of: file), turning: model.canAct && !file.isOverdue)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            StatusCircle(status: status, tint: kind.deep)
         }
-        .padding(.vertical, 14)
-        .padding(.leading, 14)
-        .padding(.trailing, 16)
-        .background(finished ? Palette.stewardBubble : kind.wash, in: .rect(cornerRadius: Palette.cardRadius))
-        .accessibilityElement(children: .combine)
-        .accessibilityValue(status.accessibilityLabel)
+        .frame(width: size + 8, height: size + 8)
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private func face(_ status: TaskStatus, turning: Bool) -> some View {
+        switch status {
+        case .needsYou:
+            OwnerAvatar(size: size)
+                .overlay(alignment: .bottomTrailing) { catBadge }
+                .background { Circle().strokeBorder(Palette.orange, lineWidth: 2).padding(-4) }
+        case .yours:
+            OwnerAvatar(size: size)
+                .overlay(alignment: .bottomTrailing) { catBadge }
+        case .onIt:
+            StewardAvatar(size: size, blinks: false, neutral: true)
+                .background { WorkingRing(turning: turning).padding(-4) }
+        case .done, .stopped:
+            StewardAvatar(size: size, blinks: false, neutral: true).opacity(0.45)
+        }
+    }
+
+    private var catBadge: some View {
+        StewardAvatar(size: size * 0.46, blinks: false, neutral: true)
+            .padding(1.5)
+            .background(Palette.row, in: .circle)
+            .offset(x: 4, y: 4)
     }
 }
 
-private struct TaskRowButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
-            .opacity(configuration.isPressed ? 0.85 : 1)
-            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
+/// The dashed ring around Steward while it works. It turns slowly while
+/// Steward can act, and holds still when it can't.
+private struct WorkingRing: View {
+    let turning: Bool
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var angle = 0.0
+
+    var body: some View {
+        Circle()
+            .inset(by: 1)
+            .stroke(Palette.muted, style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [3, 4.4]))
+            .rotationEffect(.degrees(angle))
+            .task(id: turning && !reduceMotion) {
+                guard turning, !reduceMotion else { angle = 0; return }
+                withAnimation(.linear(duration: 14).repeatForever(autoreverses: false)) { angle = 360 }
+            }
+    }
+}
+
+/// The circle that ticks a task off. 44pt to tap, drawn smaller.
+private struct CheckCircle: View {
+    let done: Bool
+    let toggle: () -> Void
+
+    var body: some View {
+        Button(action: toggle) {
+            ZStack {
+                if done {
+                    Circle().fill(Palette.muted)
+                    Image(systemName: "checkmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Palette.row)
+                } else {
+                    Circle().strokeBorder(Palette.muted, lineWidth: 1.75)
+                }
+            }
+            .frame(width: 24, height: 24)
+            .frame(width: 44, height: 44)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.borderless)
+        .sensoryFeedback(.success, trigger: done) { _, new in new }
+        .accessibilityLabel(done ? "Mark not done" : "Mark done")
+    }
+}
+
+/// How a finished errand ended, small and quiet.
+private struct FinishedMark: View {
+    let done: Bool
+
+    var body: some View {
+        Image(systemName: done ? "checkmark.circle.fill" : "xmark.circle")
+            .font(.title3)
+            .foregroundStyle(Palette.muted)
+            .frame(width: 44, height: 44)
+            .accessibilityHidden(true)
+    }
+}
+
+// MARK: Actions
+
+/// Swipes and the long-press menu: the same moves, in both places.
+private struct TaskActions: ViewModifier {
+    let item: TaskItem
+    let handToSteward: (OwnerTask) -> Void
+
+    @Environment(TasksModel.self) private var model
+
+    func body(content: Content) -> some View {
+        content
+            .swipeActions(edge: .leading, allowsFullSwipe: true) { leading }
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) { trailing }
+            .contextMenu { menu }
+    }
+
+    @ViewBuilder
+    private var leading: some View {
+        switch item {
+        case .own(let task):
+            Button(task.isDone ? "Not Done" : "Done", systemImage: task.isDone ? "arrow.uturn.backward" : "checkmark") {
+                model.setDone(task.id, !task.isDone)
+            }
+            .tint(task.isDone ? .gray : .green)
+        case .steward(let task):
+            switch TaskStatus(of: task) {
+            case .onIt where task.isOverdue && model.canWork:
+                Button("Check Back", systemImage: "arrow.clockwise") { model.checkBack(task.id) }.tint(.blue)
+            case .yours, .onIt, .needsYou:
+                Button("Done", systemImage: "checkmark") { model.markTaskDone(task.id) }.tint(.green)
+            default:
+                EmptyView()
+            }
+        case .errand(let file):
+            switch TaskStatus(of: file) {
+            case .onIt where file.isOverdue && model.canAct:
+                Button("Follow Up", systemImage: "arrow.clockwise") { model.nudge(file.id) }.tint(.blue)
+            case .yours, .onIt:
+                Button("Done", systemImage: "checkmark") { model.markDone(file.id) }.tint(.green)
+            case .done where !file.isConfirmedByOwner:
+                Button("Confirm", systemImage: "checkmark.seal") { model.markDone(file.id) }.tint(.green)
+            default:
+                EmptyView()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var trailing: some View {
+        switch item {
+        case .own(let task):
+            Button("Delete", systemImage: "trash", role: .destructive) { model.delete(task.id) }
+            if !task.isDone {
+                Button("Steward", systemImage: "arrow.right.circle") { handToSteward(task) }.tint(Palette.ink)
+            }
+        case .steward(let task):
+            if task.isFinished {
+                Button("Delete", systemImage: "trash", role: .destructive) { model.deleteStewardTask(task.id) }
+            } else {
+                Button("Stop", systemImage: "stop.circle", role: .destructive) { model.stopTask(task.id) }
+                if TaskStatus(of: task) != .yours {
+                    Button("Take Over", systemImage: "hand.raised") { model.takeOverTask(task.id) }.tint(.indigo)
+                }
+            }
+        case .errand(let file):
+            if [.needsYou, .onIt].contains(TaskStatus(of: file)) {
+                Button("Stop", systemImage: "stop.circle", role: .destructive) { model.stop(file.id) }
+                Button("Take Over", systemImage: "hand.raised") { model.takeOver(file.id) }.tint(.indigo)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var menu: some View {
+        switch item {
+        case .own(let task):
+            Button(task.isDone ? "Mark Not Done" : "Mark Done", systemImage: task.isDone ? "circle" : "checkmark.circle") {
+                model.setDone(task.id, !task.isDone)
+            }
+            if !task.isDone {
+                Button("Hand to Steward", systemImage: "arrow.right.circle") { handToSteward(task) }
+            }
+            Divider()
+            Button("Delete", systemImage: "trash", role: .destructive) { model.delete(task.id) }
+        case .steward(let task):
+            StewardTaskMenu(task: task)
+        case .errand(let file):
+            let status = TaskStatus(of: file)
+            if status == .onIt, file.isOverdue, model.canAct {
+                Button("Follow Up Now", systemImage: "arrow.clockwise") { model.nudge(file.id) }
+            }
+            if [.needsYou, .onIt, .yours].contains(status) {
+                Button("Mark Done", systemImage: "checkmark.circle") { model.markDone(file.id) }
+            }
+            if status == .done, !file.isConfirmedByOwner {
+                Button("Confirm It's Sorted", systemImage: "checkmark.seal") { model.markDone(file.id) }
+            }
+            if [.needsYou, .onIt].contains(status) {
+                Button("Take Over", systemImage: "hand.raised") { model.takeOver(file.id) }
+                Divider()
+                Button("Stop Errand", systemImage: "stop.circle", role: .destructive) { model.stop(file.id) }
+            }
+        }
+    }
+}
+
+/// The last move, with a way back, for a few seconds.
+private struct UndoToast: View {
+    @Environment(TasksModel.self) private var model
+
+    var body: some View {
+        if let undo = model.undo {
+            HStack(spacing: 16) {
+                Text(undo.message)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Palette.ink)
+                Button("Undo") { withAnimation(.snappy) { model.performUndo() } }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Palette.orangeText)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .glassEffect(.regular, in: .capsule)
+            .padding(.bottom, 12)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .task(id: undo.id) {
+                try? await Task.sleep(for: .seconds(5))
+                withAnimation(.snappy) { model.dismissUndo(undo.id) }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityAction(named: "Undo") { model.performUndo() }
+        }
+    }
+}
+
+private struct SearchWhenLong: ViewModifier {
+    @Binding var query: String
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.searchable(text: $query, prompt: "Search tasks")
+        } else {
+            content
+        }
+    }
+}
+
+// MARK: Empty
+
+/// First run: nothing yet. Two ways in, and three errands to start from.
+private struct EmptyTasks: View {
+    let add: (AddRequest) -> Void
+
+    /// A spread of what Steward can take on, so it doesn't read as one trick.
+    private let starters: [(String, String, String)] = [
+        ("Cancel a subscription", "scissors", "Cancel my "),
+        ("Plan a weekend away", "map", "Plan a weekend in "),
+        ("Compare prices", "chart.bar.xaxis", "Find the best price for "),
+        ("Remind me before a deadline", "calendar.badge.clock", "Remind me before "),
+    ]
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 28) {
+                VStack(spacing: 14) {
+                    HStack(spacing: -10) {
+                        OwnerAvatar(size: 56)
+                            .overlay(Circle().stroke(Palette.ground, lineWidth: 3))
+                        StewardAvatar(size: 56, blinks: true)
+                            .overlay(Circle().stroke(Palette.ground, lineWidth: 3))
+                    }
+                    Text("Nothing on your list")
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(Palette.ink)
+                    Text("Add something to do yourself, or hand anything to Steward. Both live here until they're done.")
+                        .font(.body)
+                        .foregroundStyle(Palette.muted)
+                        .multilineTextAlignment(.center)
+                }
+                VStack(spacing: 10) {
+                    Button { add(AddRequest()) } label: {
+                        Text("Add a Task").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Palette.orange)
+                    .foregroundStyle(Palette.onOrange)
+                    Button { add(AddRequest(doer: .steward)) } label: {
+                        Text("Ask Steward").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Palette.ink)
+                }
+                .controlSize(.large)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Steward can start with")
+                        .font(.headline)
+                        .foregroundStyle(Palette.ink)
+                    VStack(spacing: 0) {
+                        ForEach(starters, id: \.0) { title, symbol, prompt in
+                            Button { add(AddRequest(text: prompt, doer: .steward)) } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: symbol)
+                                        .font(.body.weight(.semibold))
+                                        .foregroundStyle(Palette.muted)
+                                        .frame(width: 28)
+                                    Text(title).foregroundStyle(Palette.ink)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.footnote.weight(.semibold))
+                                        .foregroundStyle(Palette.muted)
+                                }
+                                .padding(.horizontal, 16)
+                                .frame(minHeight: 50)
+                                .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                            if title != starters.last?.0 { Divider().padding(.leading, 56) }
+                        }
+                    }
+                    .background(Palette.row, in: .rect(cornerRadius: Palette.cardRadius))
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 24)
+            .padding(.bottom, 40)
+            .frame(maxWidth: 480)
+            .frame(maxWidth: .infinity)
+        }
     }
 }
 
@@ -122,12 +723,17 @@ struct KindTile: View {
     let kind: ErrandKind
     var size: CGFloat = 44
 
+    /// Grows with the glyph so the icon never spills out of its tile.
+    @ScaledMetric(relativeTo: .body) private var scale: CGFloat = 1
+
     var body: some View {
+        let side = size * min(max(scale, 1), 1.6)
         Image(systemName: kind.symbol)
             .font(.body.weight(.semibold))
+            .imageScale(scale > 1.6 ? .small : .medium)
             .foregroundStyle(kind.deep)
-            .frame(width: size, height: size)
-            .background(kind.tile, in: .rect(cornerRadius: size * 0.28))
+            .frame(width: side, height: side)
+            .background(kind.tile, in: .rect(cornerRadius: side * 0.28))
             .accessibilityHidden(true)
     }
 }
@@ -140,6 +746,7 @@ struct StatusCircle: View {
     var size: CGFloat = 28
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var turning = false
 
     var body: some View {
         ZStack {
@@ -148,14 +755,18 @@ struct StatusCircle: View {
                 Circle().strokeBorder(Palette.orange, lineWidth: 2.5)
                 Circle().fill(Palette.orange).frame(width: size * 0.32, height: size * 0.32)
             case .onIt:
-                if reduceMotion {
-                    dashedRing
-                } else {
-                    TimelineView(.animation) { context in
-                        let turn = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 14) / 14
-                        dashedRing.rotationEffect(.degrees(turn * 360))
+                // One repeating animation instead of a redraw every frame.
+                dashedRing
+                    .rotationEffect(.degrees(turning ? 360 : 0))
+                    .onAppear {
+                        guard !reduceMotion else { return }
+                        withAnimation(.linear(duration: 14).repeatForever(autoreverses: false)) { turning = true }
                     }
-                }
+                    .onChange(of: reduceMotion) {
+                        if reduceMotion { withAnimation(nil) { turning = false } }
+                    }
+            case .yours:
+                Circle().strokeBorder(Palette.ink, lineWidth: 2)
             case .done:
                 Circle().fill(Palette.ink)
                 Image(systemName: "checkmark")

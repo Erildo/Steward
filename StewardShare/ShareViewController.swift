@@ -10,6 +10,7 @@ final class ShareViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .clear
+        overrideUserInterfaceStyle = Appearance.current.interfaceStyle
         let items = (extensionContext?.inputItems as? [NSExtensionItem]) ?? []
         let pageTitle = items.lazy.compactMap { $0.attributedContentText?.string }.first { !$0.isEmpty }
         let providers = Providers(list: items.flatMap { $0.attachments ?? [] })

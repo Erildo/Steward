@@ -6,16 +6,26 @@ enum Palette {
     static let ground = dynamic(light: 0xFFFFFF, dark: 0x0B0D12)
     static let ink = dynamic(light: 0x1C1C1E, dark: 0xF2F0EA)
     static let stewardBubble = dynamic(light: 0xEDEDF0, dark: 0x1C2029)
-    static let muted = dynamic(light: 0x6C6C70, dark: 0xA0A6B4)
+    /// 5:1 or better on the ground and on Steward's bubbles, in both themes.
+    static let muted = dynamic(light: 0x636367, dark: 0xA0A6B4)
     /// Primary. Only on your words, the current tab, send and the focus ring.
     static let orange = dynamic(light: 0xF15A29, dark: 0xF15A29)
+    /// Orange for small text and thin strokes. The primary is 3.4:1 on white,
+    /// too faint for words, so light mode deepens it (5.2:1).
+    static let orangeText = dynamic(light: 0xBF4317, dark: 0xF15A29)
     static let onOrange = dynamic(light: 0x1F0D05, dark: 0x1F0D05)
+    /// Behind the owner's initials: a step off the grouped rows they sit on.
+    static let ownerTint = dynamic(light: 0xD8D8DF, dark: 0x2E3443)
+    /// Grouped task rows on the ground.
+    static let row = dynamic(light: 0xF2F2F5, dark: 0x161A22)
 
     static let bubbleRadius: CGFloat = 19
     static let cardRadius: CGFloat = 16
 
-    static func dynamic(light: UInt32, dark: UInt32) -> Color {
-        Color(uiColor: UIColor { traits in
+    /// SwiftUI may resolve colours off the main thread (while animating), so
+    /// the provider must not be main-actor isolated, or it traps there.
+    nonisolated static func dynamic(light: UInt32, dark: UInt32) -> Color {
+        Color(uiColor: UIColor { @Sendable traits in
             let hex = traits.userInterfaceStyle == .dark ? dark : light
             return UIColor(
                 red: CGFloat((hex >> 16) & 0xFF) / 255,
@@ -31,6 +41,29 @@ enum Appearance: String, CaseIterable, Identifiable {
     case light, dark, system
 
     static let storageKey = "appearance"
+
+    /// Shared with the Share extension through the app group, so the share
+    /// sheet follows the owner's choice too. Carries over a choice made before.
+    static let store: UserDefaults = {
+        let shared = UserDefaults(suiteName: "group.com.steward.app") ?? .standard
+        if shared.string(forKey: storageKey) == nil,
+           let earlier = UserDefaults.standard.string(forKey: storageKey) {
+            shared.set(earlier, forKey: storageKey)
+        }
+        return shared
+    }()
+
+    static var current: Appearance {
+        store.string(forKey: storageKey).flatMap(Appearance.init(rawValue:)) ?? .light
+    }
+
+    var interfaceStyle: UIUserInterfaceStyle {
+        switch self {
+        case .light: .light
+        case .dark: .dark
+        case .system: .unspecified
+        }
+    }
 
     var id: String { rawValue }
 
@@ -56,17 +89,19 @@ enum Appearance: String, CaseIterable, Identifiable {
 struct StewardAvatar: View {
     var size: CGFloat = 30
     var blinks = true
+    /// Ink instead of orange, for lists where orange is kept for what needs you.
+    var neutral = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var eyeOpen: CGFloat = 1
 
     var body: some View {
         CatShape(eyeOpen: eyeOpen, small: size < 40)
-            .fill(Palette.onOrange)
+            .fill(neutral ? Palette.ground : Palette.onOrange)
             .frame(width: size * 0.64, height: size * 0.64)
             .offset(y: size * 0.02)
             .frame(width: size, height: size)
-            .background(Palette.orange, in: .circle)
+            .background(neutral ? Palette.ink : Palette.orange, in: .circle)
             .accessibilityHidden(true)
             .task(id: blinks && !reduceMotion) {
                 guard blinks, !reduceMotion else { return }

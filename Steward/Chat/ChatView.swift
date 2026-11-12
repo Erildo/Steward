@@ -6,13 +6,14 @@ struct ChatView: View {
     @State private var showsNewConversationConfirm = false
     @State private var showsPanel = false
     @State private var reviewRequest = 0
-    @AppStorage(Appearance.storageKey) private var appearance = Appearance.light
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(Appearance.storageKey, store: Appearance.store) private var appearance = Appearance.light
+    @Environment(AppRouter.self) private var router
 
     var body: some View {
         NavigationStack {
             thread
                 .background(Palette.ground)
-                .overlay(alignment: .top) { panel }
                 .safeAreaInset(edge: .bottom) {
                     Composer(text: $draft) {
                         model.send(draft)
@@ -23,6 +24,12 @@ struct ChatView: View {
                 .toolbar { toolbar }
                 .onChange(of: model.activity, initial: true) {
                     LiveErrandActivity.sync(model.activity, errandTitle: model.activeErrand?.title)
+                }
+                .onChange(of: router.chatDraft, initial: true) {
+                    // A task handed over from Tasks: written, but not sent until the owner says so.
+                    guard let handed = router.chatDraft else { return }
+                    if !handed.isEmpty { draft = handed }
+                    router.chatDraft = nil
                 }
                 .onChange(of: model.activeErrandID) {
                     if model.activeErrandID == nil { showsPanel = false }
@@ -36,9 +43,12 @@ struct ChatView: View {
         .environment(model)
     }
 
+    /// The errand at a glance, in a system popover: it closes on a tap outside
+    /// or VoiceOver's escape, takes focus when it opens, and fades under
+    /// Reduce Motion.
     @ViewBuilder
     private var panel: some View {
-        if showsPanel, let errand = model.activeErrand {
+        if let errand = model.activeErrand {
             ErrandPanel(
                 errand: errand,
                 review: {
@@ -47,9 +57,8 @@ struct ChatView: View {
                 },
                 stop: { model.stopActiveErrand() }
             )
-            .padding(.horizontal, 12)
-            .padding(.top, 6)
-            .transition(.scale(scale: 0.6, anchor: .top).combined(with: .opacity))
+            .frame(width: 320)
+            .presentationCompactAdaptation(.popover)
         }
     }
 
@@ -79,6 +88,7 @@ struct ChatView: View {
                                 message: message,
                                 endsGroup: ThreadTime.endsGroup(index, in: model.messages),
                                 showsStatus: message.id == latestOwnerMessageID,
+                                hasFocusRing: message.id == latestStewardMessageID,
                                 retry: { model.retry(message.id) }
                             )
                             .id(message.id)
@@ -86,6 +96,9 @@ struct ChatView: View {
                         if model.isStewardWorking {
                             WorkingRow().id("working")
                         }
+                    }
+                    .backgroundPreferenceValue(FocusRingAnchor.self) { anchor in
+                        FocusRing(anchor: anchor, messageID: latestStewardMessageID, reduceMotion: reduceMotion)
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 12)
@@ -104,6 +117,10 @@ struct ChatView: View {
 
     private var latestOwnerMessageID: UUID? {
         model.messages.last { $0.author == .owner }?.id
+    }
+
+    private var latestStewardMessageID: UUID? {
+        model.messages.last { $0.author == .steward }?.id
     }
 
     private func scrollToEnd(_ proxy: ScrollViewProxy) {
@@ -137,11 +154,14 @@ struct ChatView: View {
                     .foregroundStyle(Palette.ink)
                     .accessibilityLabel("Menu")
             }
+            // Orange is kept for your words, the tab, send and the focus ring.
+            .tint(Palette.ink)
         }
         ToolbarItem(placement: .principal) {
             StewardActivityPill(activity: model.activity) {
-                withAnimation(.spring(response: 0.38, dampingFraction: 0.85)) { showsPanel.toggle() }
+                showsPanel.toggle()
             }
+            .popover(isPresented: $showsPanel, arrowEdge: .top) { panel }
         }
         .sharedBackgroundVisibility(.hidden)
     }
@@ -162,10 +182,53 @@ private struct BubbleTail: Shape {
     }
 }
 
+/// Where Steward's latest reply sits, so the thread can draw one ring around it.
+nonisolated private struct FocusRingAnchor: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = value ?? nextValue()
+    }
+}
+
+/// The signature move: a thin orange ring on Steward's newest reply. It is one
+/// ring, so when a new reply lands it travels down to it; under Reduce Motion
+/// it fades out of the old reply and into the new one instead. It sits behind
+/// the bubbles, so the tail reads as passing through it.
+private struct FocusRing: View {
+    let anchor: Anchor<CGRect>?
+    let messageID: UUID?
+    let reduceMotion: Bool
+
+    var body: some View {
+        GeometryReader { proxy in
+            if let anchor {
+                let rect = proxy[anchor].insetBy(dx: -3.5, dy: -3.5)
+                if reduceMotion {
+                    ring(in: rect)
+                        .id(messageID)
+                        .transition(.opacity)
+                } else {
+                    ring(in: rect)
+                }
+            }
+        }
+        .animation(reduceMotion ? .easeInOut(duration: 0.3) : .smooth(duration: 0.45), value: messageID)
+        .accessibilityHidden(true)
+    }
+
+    private func ring(in rect: CGRect) -> some View {
+        RoundedRectangle(cornerRadius: Palette.bubbleRadius + 3.5)
+            .strokeBorder(Palette.orange, lineWidth: 1.5)
+            .frame(width: rect.width, height: rect.height)
+            .position(x: rect.midX, y: rect.midY)
+    }
+}
+
 private struct MessageRow: View {
     let message: ChatMessage
     let endsGroup: Bool
     let showsStatus: Bool
+    var hasFocusRing = false
     let retry: () -> Void
 
     private var isOwner: Bool { message.author == .owner }
@@ -198,6 +261,7 @@ private struct MessageRow: View {
             .padding(.horizontal, 13)
             .padding(.vertical, 8)
             .background(fill, in: .rect(cornerRadius: Palette.bubbleRadius))
+            .anchorPreference(key: FocusRingAnchor.self, value: .bounds) { hasFocusRing ? $0 : nil }
             .background(alignment: isOwner ? .bottomTrailing : .bottomLeading) {
                 if endsGroup && message.attachment == nil {
                     BubbleTail()
@@ -273,6 +337,12 @@ private struct Composer: View {
     let send: () -> Void
 
     @State private var showsVoiceNotice = false
+    /// The send circle grows with the reader's text size, like the glyphs do.
+    @ScaledMetric(relativeTo: .body) private var sendSize: CGFloat = 34
+    /// Tap area for the composer's buttons: 44 pt at default sizes, growing
+    /// with the glyphs at large ones so they keep a margin inside the capsule.
+    @ScaledMetric(relativeTo: .body) private var scaledControl: CGFloat = 44
+    private var control: CGFloat { min(max(scaledControl, 44), 64) }
 
     private var canSend: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -300,9 +370,9 @@ private struct Composer: View {
                     Image(systemName: "arrow.up")
                         .font(.body.weight(.bold))
                         .foregroundStyle(Palette.onOrange)
-                        .frame(width: 34, height: 34)
+                        .frame(width: sendSize, height: sendSize)
                         .background(Palette.orange, in: .circle)
-                        .frame(width: 44, height: 44)
+                        .frame(minWidth: control, minHeight: control)
                         .contentShape(.rect)
                 }
                 .accessibilityLabel("Send")
@@ -327,7 +397,7 @@ private struct Composer: View {
         Image(systemName: name)
             .font(.body.weight(.medium))
             .foregroundStyle(Palette.ink)
-            .frame(width: 44, height: 44)
+            .frame(minWidth: control, minHeight: control)
             .contentShape(.rect)
     }
 }

@@ -73,6 +73,26 @@ final class CaseRunner {
         return next
     }
 
+    /// A move the owner makes without the agent (take over, stop, mark done).
+    /// It waits its turn behind any running wake, so a wake that was sending
+    /// finishes first and the owner's move lands on the case as it left it.
+    func update(_ id: UUID, from origin: Origin = .tasks, _ change: @escaping @MainActor (inout CaseFile) -> Void) async throws -> CaseFile {
+        try await queue.run(id) { @MainActor in
+            let file: CaseFile
+            if let known = self.cases[id] {
+                file = known
+            } else {
+                do { file = try self.store.load(id) } catch { throw UnknownCase() }
+            }
+            var next = file
+            change(&next)
+            self.cases[id] = next
+            try self.store.save(next)
+            self.notify(file, next, origin)
+            return next
+        }
+    }
+
     private func notify(_ before: CaseFile, _ after: CaseFile, _ origin: Origin) {
         guard before != after else { return }
         for observer in observers { observer(before, after, origin) }

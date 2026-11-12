@@ -122,7 +122,9 @@ private struct ListSection: View {
 
     var body: some View {
         Section {
-            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+            // Items are unique (add() refuses repeats), so each is its own id
+            // and swipe-to-delete animates the row that went.
+            ForEach(items, id: \.self) { item in
                 Text(item).foregroundStyle(Palette.ink)
             }
             .onDelete { offsets in edit { $0.remove(atOffsets: offsets) } }

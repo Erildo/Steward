@@ -25,6 +25,7 @@ struct CaseDetailView: View {
         }
         .background(Palette.ground)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { CaseMenu(file: file) } }
     }
 
     private func header(_ kind: ErrandKind) -> some View {
@@ -238,7 +239,7 @@ private struct ActivityList: View {
                         }
                     }
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(event.detail)
+                        Text(Self.readable(event))
                             .font(.subheadline)
                             .foregroundStyle(Palette.ink)
                         Text(event.date.formatted(.dateTime.day().month(.abbreviated).hour().minute()))
@@ -253,6 +254,15 @@ private struct ActivityList: View {
         }
     }
 
+    /// The agent logs a close as "<status>: summary" (for example
+    /// "needsOwner: …"). The status is shown elsewhere; the owner reads the summary.
+    static func readable(_ event: CaseFile.Event) -> String {
+        guard event.kind == "closed", let colon = event.detail.range(of: ": "),
+              CaseFile.Closure.Status(rawValue: String(event.detail[..<colon.lowerBound])) != nil
+        else { return event.detail }
+        return String(event.detail[colon.upperBound...])
+    }
+
     private func symbol(for kind: String) -> String {
         switch kind {
         case "opened": "flag"
@@ -261,6 +271,9 @@ private struct ActivityList: View {
         case "approval_asked": "hand.raised"
         case "owner_edited": "pencil"
         case "owner_declined": "xmark"
+        case "owner_took_over": "hand.raised"
+        case "owner_stopped": "stop.circle"
+        case "owner_confirmed": "checkmark.seal.fill"
         case "owner_answer": "text.bubble"
         case "ask_owner": "questionmark.bubble"
         case "waiting", "wait": "clock"
@@ -270,5 +283,37 @@ private struct ActivityList: View {
         case "wake_failed": "exclamationmark.triangle"
         default: "circle"
         }
+    }
+}
+
+/// The owner's own moves on an errand, beside Steward's: take it over,
+/// stop it, or say it's sorted.
+private struct CaseMenu: View {
+    let file: CaseFile
+
+    @Environment(TasksModel.self) private var model
+
+    var body: some View {
+        let status = TaskStatus(of: file)
+        Menu {
+            if status == .onIt, file.isOverdue, model.canAct {
+                Button("Follow Up Now", systemImage: "arrow.clockwise") { model.nudge(file.id) }
+            }
+            if [.needsYou, .onIt, .yours].contains(status) {
+                Button("Mark Done", systemImage: "checkmark.circle") { model.markDone(file.id) }
+            }
+            if status == .done, !file.isConfirmedByOwner {
+                Button("Confirm It's Sorted", systemImage: "checkmark.seal") { model.markDone(file.id) }
+            }
+            if [.needsYou, .onIt].contains(status) {
+                Button("Take Over", systemImage: "hand.raised") { model.takeOver(file.id) }
+                Divider()
+                Button("Stop Errand", systemImage: "stop.circle", role: .destructive) { model.stop(file.id) }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+        }
+        .accessibilityLabel("Errand actions")
+        .disabled(status == .stopped || (status == .done && file.isConfirmedByOwner))
     }
 }

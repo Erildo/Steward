@@ -72,6 +72,12 @@ public struct ToolSpec: Sendable {
     public var name: String
     public var description: String
     public var parameters: JSONValue
+
+    public init(name: String, description: String, parameters: JSONValue) {
+        self.name = name
+        self.description = description
+        self.parameters = parameters
+    }
 }
 
 public struct AssistantTurn: Sendable, Equatable {

@@ -15,6 +15,7 @@ struct FeedView: View {
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Your taste", systemImage: "slider.horizontal.3") { showsTaste = true }
+                            .tint(Palette.ink)
                     }
                 }
                 .sheet(isPresented: $showsTaste) {
@@ -86,7 +87,8 @@ struct FeedView: View {
             .padding(.vertical, 6)
         case .noModel:
             Banner(systemImage: "bolt.horizontal.circle",
-                   text: "Steward isn't connected to a model yet, so it can't look for new things.")
+                   text: "Steward isn't connected to a model yet, so it can't look for new things. What you tell it now is kept for when it can.",
+                   action: ("Edit Your Taste", { showsTaste = true }))
         case .failed(let message):
             Banner(systemImage: "exclamationmark.circle", text: message)
         case .idle:
@@ -111,10 +113,12 @@ struct FeedView: View {
                     lastHidden = nil
                 }
                 .font(.subheadline.weight(.semibold))
-                .tint(Palette.orange)
+                .tint(Palette.orangeText)
+                .frame(minHeight: 44)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.leading, 16)
+            .padding(.trailing, 8)
+            .padding(.vertical, 2)
             .glassEffect(.regular, in: .capsule)
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
@@ -180,21 +184,36 @@ private struct SectionHeader: View {
 private struct Banner: View {
     let systemImage: String
     let text: String
+    var action: (title: String, run: () -> Void)?
     var dismiss: (() -> Void)?
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: systemImage).foregroundStyle(Palette.muted)
-            Text(text).font(.subheadline).foregroundStyle(Palette.ink)
+                .padding(.top, 12)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(text).font(.subheadline).foregroundStyle(Palette.ink)
+                if let action {
+                    Button(action.title, action: action.run)
+                        .font(.subheadline.weight(.semibold))
+                        .tint(Palette.ink)
+                        .frame(minHeight: 44)
+                }
+            }
+            .padding(.vertical, 12)
+            .padding(.bottom, action == nil ? 0 : -12)
             Spacer(minLength: 0)
             if let dismiss {
                 Button("Dismiss", systemImage: "xmark", action: dismiss)
                     .labelStyle(.iconOnly)
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(Palette.muted)
+                    .frame(width: 44, height: 44)
+                    .contentShape(.rect)
             }
         }
-        .padding(12)
+        .padding(.leading, 12)
+        .padding(.trailing, dismiss == nil ? 12 : 0)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.stewardBubble, in: .rect(cornerRadius: Palette.cardRadius))
     }
@@ -248,32 +267,60 @@ struct FeedCardView: View {
                 .accessibilityLabel("Why: \(card.why)")
             }
 
-            HStack(spacing: 8) {
-                let liked = model.reaction(to: card) == .more
-                PillButton(title: "More like this", systemImage: liked ? "hand.thumbsup.fill" : "hand.thumbsup", selected: liked) {
-                    model.react(.more, to: card)
+            // One row when every label fits unwrapped; at larger text sizes the
+            // save/share pair drops below, then each reaction gets its own line.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    reactions
+                    Spacer(minLength: 0)
+                    keepers
                 }
-                PillButton(title: "Not for me", systemImage: "hand.thumbsdown", selected: false, action: hide)
-                Spacer(minLength: 0)
-                let saved = model.isSaved(card)
-                Button(saved ? "Saved" : "Save", systemImage: saved ? "bookmark.fill" : "bookmark") {
-                    model.toggleSaved(card)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) { reactions }
+                    keepers
                 }
-                .labelStyle(.iconOnly)
-                .foregroundStyle(saved ? Palette.orange : Palette.muted)
-                .frame(width: 36, height: 36)
-                .contentShape(.rect)
-                ShareLink(item: card.url) {
-                    Label("Share", systemImage: "square.and.arrow.up").labelStyle(.iconOnly)
+                VStack(alignment: .leading, spacing: 4) {
+                    reactions
+                    keepers
                 }
-                .foregroundStyle(Palette.muted)
-                .frame(width: 36, height: 36)
             }
+            .padding(.trailing, -10)
+            .padding(.vertical, -6)
             .font(.subheadline)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.stewardBubble, in: .rect(cornerRadius: Palette.cardRadius))
+    }
+
+    @ViewBuilder
+    private var reactions: some View {
+        let liked = model.reaction(to: card) == .more
+        PillButton(title: "More like this", systemImage: liked ? "hand.thumbsup.fill" : "hand.thumbsup", selected: liked) {
+            model.react(.more, to: card)
+        }
+        PillButton(title: "Not for me", systemImage: "hand.thumbsdown", selected: false, action: hide)
+    }
+
+    /// Save and Share: 44 pt targets whose glyphs sit close together.
+    private var keepers: some View {
+        HStack(spacing: 0) {
+            let saved = model.isSaved(card)
+            Button(saved ? "Saved" : "Save", systemImage: saved ? "bookmark.fill" : "bookmark") {
+                model.toggleSaved(card)
+            }
+            .labelStyle(.iconOnly)
+            .foregroundStyle(saved ? Palette.orangeText : Palette.muted)
+            .frame(width: 44, height: 44)
+            .contentShape(.rect)
+            ShareLink(item: card.url) {
+                Label("Share", systemImage: "square.and.arrow.up").labelStyle(.iconOnly)
+                    .frame(width: 44, height: 44)
+                    .contentShape(.rect)
+            }
+            .foregroundStyle(Palette.muted)
+        }
+        .font(.subheadline)
     }
 }
 
@@ -289,8 +336,11 @@ private struct PillButton: View {
                 .font(.footnote.weight(.medium))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
-                .foregroundStyle(selected ? Palette.orange : Palette.ink)
+                .foregroundStyle(selected ? Palette.orangeText : Palette.ink)
                 .background(Palette.ground, in: .capsule)
+                // The capsule stays compact; the tap area meets 44 pt.
+                .frame(minHeight: 44)
+                .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])

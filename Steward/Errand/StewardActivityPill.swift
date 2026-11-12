@@ -119,7 +119,5 @@ struct ErrandPanel: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.thickMaterial, in: .rect(cornerRadius: 24))
-        .shadow(color: .black.opacity(0.18), radius: 18, y: 8)
     }
 }
