@@ -278,14 +278,14 @@ final class TasksModel {
         createStewardTask(goal)
     }
 
-    private func createStewardTask(_ goal: String) -> StewardTask? {
+    private func createStewardTask(_ goal: String, wakes: Bool = true) -> StewardTask? {
         let goal = goal.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !goal.isEmpty else { return nil }
         var task = StewardTask(goal: goal)
         task.say(.owner, goal)
         stewardTasks.append(task)
         saveStewardTasks()
-        work(task.id, .start)
+        if wakes { wake(task.id, .start) }
         return task
     }
 
@@ -298,7 +298,90 @@ final class TasksModel {
         // Writing on a finished or handed-back task picks it back up.
         task.state = .working
         replace(task)
-        work(id, .message)
+        wake(id, .message)
+    }
+
+    /// Wakes the agent, or says plainly that there isn't one yet, so a
+    /// conversation never sits on the owner's words with no reply.
+    private func wake(_ id: UUID, _ wake: TaskWake) {
+        guard agent != nil else {
+            guard var task = stewardTask(id), task.messages.last?.author == .owner else { return }
+            task.say(.steward, "I'm not connected to an AI model yet, so I can't work on this. It's saved here, and I'll pick it up once I'm connected.",
+                     blocks: [.choices(.init(options: [Self.demoChoice]))])
+            replace(task)
+            return
+        }
+        work(id, wake)
+    }
+
+    /// The answer that starts the demo errand while nothing is connected.
+    static let demoChoice = "Show me a demo errand"
+
+    // MARK: Conversations
+
+    /// Every conversation with Steward for Chats: pinned first, then the
+    /// most recent. The same threads Tasks groups by who acts next.
+    var conversations: [StewardTask] {
+        stewardTasks.sorted { a, b in
+            if a.isPinned != b.isPinned { return a.isPinned }
+            return a.lastActivity > b.lastActivity
+        }
+    }
+
+    /// Starts a conversation from the owner's first words. `wakes` is false
+    /// when Chat runs it itself (an errand), so the agent stays out of it.
+    @discardableResult
+    func startConversation(_ text: String, wakes: Bool = true) -> UUID? {
+        createStewardTask(text, wakes: wakes)?.id
+    }
+
+    /// Adds a message without waking the agent. Returns its id.
+    @discardableResult
+    func post(_ id: UUID, _ author: StewardTask.Message.Author, _ text: String, blocks: [ReplyBlock] = []) -> UUID? {
+        guard var task = stewardTask(id) else { return nil }
+        let messageID = task.say(author, text, blocks: blocks)
+        replace(task)
+        return messageID
+    }
+
+    /// Changes one message in place, such as a draft that was approved.
+    func editMessage(_ id: UUID, _ messageID: UUID, _ edit: (inout StewardTask.Message) -> Void) {
+        guard var task = stewardTask(id), let index = task.messages.firstIndex(where: { $0.id == messageID }) else { return }
+        edit(&task.messages[index])
+        replace(task)
+    }
+
+    /// Changes one block of a message in place.
+    func editBlock(_ id: UUID, _ messageID: UUID, at index: Int, _ edit: (inout ReplyBlock) -> Void) {
+        editMessage(id, messageID) { message in
+            guard var blocks = message.blocks, blocks.indices.contains(index) else { return }
+            edit(&blocks[index])
+            message.blocks = blocks
+        }
+    }
+
+    func setState(_ id: UUID, _ state: StewardTask.State, result: String? = nil) {
+        guard var task = stewardTask(id) else { return }
+        task.state = state
+        if let result { task.result = result }
+        replace(task)
+    }
+
+    func setCase(_ id: UUID, _ caseID: UUID) {
+        guard var task = stewardTask(id) else { return }
+        task.caseID = caseID
+        replace(task)
+    }
+
+    func setPinned(_ id: UUID, _ pinned: Bool) {
+        guard var task = stewardTask(id) else { return }
+        task.pinned = pinned ? true : nil
+        replace(task)
+    }
+
+    /// The conversation that carries a case, if one does.
+    func conversation(carrying caseID: UUID) -> StewardTask? {
+        stewardTasks.first { $0.caseID == caseID }
     }
 
     /// Tasks left mid-step when the app last closed: pick them up again.
@@ -687,17 +770,20 @@ extension TasksModel {
     static func launch() -> TasksModel {
         let taskStore = OwnerTaskStore(url: CaseService.store.folder
             .deletingLastPathComponent()
-            .appending(path: CaseService.isTasksSample ? "owner-tasks-\(UUID().uuidString).json" : "OwnerTasks.json"))
+            .appending(path: CaseService.usesScratchFiles ? "owner-tasks-\(UUID().uuidString).json" : "OwnerTasks.json"))
         let stewardStore = JSONListStore<StewardTask>(url: taskStore.url.deletingLastPathComponent()
-            .appending(path: CaseService.isTasksSample ? "steward-tasks-\(UUID().uuidString).json" : "StewardTasks.json"))
+            .appending(path: CaseService.usesScratchFiles ? "steward-tasks-\(UUID().uuidString).json" : "StewardTasks.json"))
         if UserDefaults.standard.string(forKey: "uiState") == "tasks" {
             for file in TasksSample.cases() { try? CaseService.store.save(file) }
             try? taskStore.save(OwnerTask.samples())
             try? stewardStore.save(StewardTask.samples())
         }
+        if CaseService.isChatSample {
+            try? stewardStore.save(StewardTask.samples() + StewardTask.chatSamples())
+        }
         // Sample launches get the scripted stand-in; otherwise a real model
         // when one is set up (debug key for now), or nothing.
-        let agent: (any TaskAgent)? = CaseService.isTasksSample
+        let agent: (any TaskAgent)? = CaseService.isTasksSample || CaseService.isChatSample
             ? SampleTaskAgent()
             : ModelAccess.feedModel().map { ModelTaskAgent(model: $0) }
         let model = TasksModel(store: CaseService.store, taskStore: taskStore, stewardStore: stewardStore,

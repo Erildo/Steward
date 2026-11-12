@@ -1,17 +1,12 @@
 import Foundation
+import StewardCore
 
-struct DeadlineInfo: Equatable {
-    let daysLeft: Int
-    let elapsedFraction: Double
-    let lastDay: Date
-    let nextPayment: Date
-    let amount: String
-}
-
+/// The errand under way in chat: its steps and who moves next. It drives the
+/// Steward pill and the Live Activity; the conversation keeps the record, as
+/// reply blocks in its messages.
 struct Errand: Identifiable {
     enum Phase { case running, needsYou, finished, stopped }
-    enum Approval { case notAsked, pending, approved, declined }
-    enum StepState { case pending, active, waiting, done }
+    typealias StepState = ReplyBlock.Steps.State
 
     struct Step: Identifiable {
         let id = UUID()
@@ -24,14 +19,15 @@ struct Errand: Identifiable {
     let title: String
     var steps: [Step]
     var phase: Phase = .running
-    var approval: Approval = .notAsked
-    var recipient: String
-    var subject: String
-    var messageBody: String
-    /// Shown on the cards while nothing is really sent: "Demo" or "Simulated".
+    /// Shown while nothing is really sent: "Demo" or "Simulated".
     var label: String? = "Demo"
 
-    /// A real errand run by the agent. The draft fields fill in when it asks for approval.
+    /// The steps as a block for the conversation.
+    var stepsBlock: ReplyBlock {
+        .steps(.init(title: title, steps: steps.map { .init(title: $0.title, state: $0.state) }))
+    }
+
+    /// A real errand run by the agent.
     static func agentErrand(id: UUID, title: String, label: String?) -> Errand {
         Errand(
             id: id,
@@ -42,13 +38,11 @@ struct Errand: Identifiable {
                 Step(title: "Wait for their reply", activeTitle: "Waiting for their reply"),
                 Step(title: "Get it confirmed in writing", activeTitle: "Reading their reply"),
             ],
-            recipient: "",
-            subject: "",
-            messageBody: "",
             label: label
         )
     }
 
+    /// The scripted errand that runs while no agent is connected.
     static func demoGymCancellation() -> Errand {
         Errand(
             title: "Cancel gym membership",
@@ -58,10 +52,7 @@ struct Errand: Identifiable {
                 Step(title: "Write the cancellation email", activeTitle: "Writing the email"),
                 Step(title: "Send it, with your OK", activeTitle: "Sending the email"),
                 Step(title: "Get confirmation", activeTitle: "Getting confirmation"),
-            ],
-            recipient: "members@northside-gym.example",
-            subject: "Please cancel my membership",
-            messageBody: "Hello,\n\nPlease cancel my membership and confirm the date it ends. I'm giving notice within the period in your terms.\n\nThank you."
+            ]
         )
     }
 }

@@ -17,6 +17,11 @@ struct StewardTask: Codable, Identifiable, Equatable {
     var result: String?
     /// A company case this task runs, when it needs one.
     var caseID: UUID?
+    /// Kept at the top of Chats. Optional so older files still read.
+    var pinned: Bool?
+
+    var isPinned: Bool { pinned ?? false }
+    var lastActivity: Date { messages.last?.date ?? createdAt }
 
     struct Message: Codable, Identifiable, Equatable {
         enum Author: String, Codable { case owner, steward }
@@ -24,6 +29,10 @@ struct StewardTask: Codable, Identifiable, Equatable {
         var author: Author
         var text: String
         var date: Date = .now
+        /// Interface shown with Steward's words. Optional so older files still read.
+        var blocks: [ReplyBlock]?
+
+        var allBlocks: [ReplyBlock] { blocks ?? [] }
     }
 
     /// Where the task stands. Every waiting state says who moves next.
@@ -80,10 +89,14 @@ struct StewardTask: Codable, Identifiable, Equatable {
         }
     }
 
-    mutating func say(_ author: Message.Author, _ text: String) {
+    /// Adds a message. A reply may be blocks alone; nothing at all is dropped.
+    @discardableResult
+    mutating func say(_ author: Message.Author, _ text: String, blocks: [ReplyBlock] = []) -> UUID? {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        messages.append(Message(author: author, text: text))
+        guard !text.isEmpty || !blocks.isEmpty else { return nil }
+        let message = Message(author: author, text: text, blocks: blocks.isEmpty ? nil : blocks)
+        messages.append(message)
+        return message.id
     }
 }
 
@@ -139,6 +152,13 @@ struct ModelTaskAgent: TaskAgent {
     - finish: the task is done; put the full answer in `result`.
     - wait: there's nothing to do until a later date (a reminder, a deadline).
     - hand_back: the rest needs the owner; say why and what to do.
+    Every tool takes optional `blocks`: interface shown with your words on the owner's phone. Use one only when it saves typing or reading:
+    - choices: when the answer is one of a few, offer up to 4 short answers to tap.
+    - field: when you need one value (an email, a date, a number).
+    - compare: 2 to 4 options side by side, marking your pick.
+    - timeline: a plan in order (days, times, steps).
+    - deadline: a date that matters and what happens around it.
+    Never repeat a block's content in your words; say the one line that matters and let the block carry the rest.
     """
 
     private static let tools: [ToolSpec] = [
@@ -147,23 +167,21 @@ struct ModelTaskAgent: TaskAgent {
         ToolSpec(name: "finish", description: "The task is done. Give the owner the full result.",
                  parameters: schema(["result": "The answer, plan, shortlist or draft, ready to use."])),
         ToolSpec(name: "wait", description: "Come back to the task after some days.",
-                 parameters: .object([
-                    "type": .string("object"),
-                    "properties": .object([
-                        "days": .object(["type": .string("number"), "description": .string("Days from now.")]),
-                        "note": .object(["type": .string("string"), "description": .string("What happens then, in a few words.")]),
-                    ]),
-                    "required": .array([.string("days"), .string("note")]),
-                 ])),
+                 parameters: schema(["note": "What happens then, in a few words."],
+                                    extra: ["days": .object(["type": .string("number"), "description": .string("Days from now.")])])),
         ToolSpec(name: "hand_back", description: "The rest needs the owner. Say why and what to do.",
                  parameters: schema(["reason": "Why, and the owner's next step."])),
     ]
 
-    private static func schema(_ fields: [String: String]) -> JSONValue {
-        .object([
+    /// Required string fields, any other required fields, and the optional blocks.
+    private static func schema(_ fields: [String: String], extra: [String: JSONValue] = [:]) -> JSONValue {
+        var properties = fields.mapValues { JSONValue.object(["type": .string("string"), "description": .string($0)]) }
+        properties.merge(extra) { $1 }
+        properties["blocks"] = ReplyBlock.modelSchema
+        return .object([
             "type": .string("object"),
-            "properties": .object(fields.mapValues { .object(["type": .string("string"), "description": .string($0)]) }),
-            "required": .array(fields.keys.map { .string($0) }),
+            "properties": .object(properties),
+            "required": .array((Array(fields.keys) + Array(extra.keys)).sorted().map { .string($0) }),
         ])
     }
 
@@ -182,25 +200,26 @@ struct ModelTaskAgent: TaskAgent {
         let call = turn.toolCalls.first
         let text = turn.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         func argument(_ key: String) -> String { call?.arguments[key]?.string ?? "" }
+        let blocks = ReplyBlock.fromModel(call?.arguments["blocks"])
 
         switch call?.name {
         case "ask_owner":
-            next.say(.steward, text)
             let question = argument("question").isEmpty ? text : argument("question")
-            next.say(.steward, question)
+            if text != question { next.say(.steward, text) }
+            next.say(.steward, question, blocks: blocks)
             next.state = .needsAnswer(question: question)
         case "finish":
             let result = argument("result").isEmpty ? text : argument("result")
-            next.say(.steward, result)
+            next.say(.steward, result, blocks: blocks)
             next.result = result
             next.state = .done(date: .now, confirmedByOwner: false)
         case "wait":
             let days = call?.arguments["days"]?.int ?? 1
-            next.say(.steward, text.isEmpty ? argument("note") : text)
+            next.say(.steward, text.isEmpty ? argument("note") : text, blocks: blocks)
             next.state = .waiting(until: .now.addingTimeInterval(Double(max(days, 1)) * 86_400), note: argument("note"))
         case "hand_back":
             let reason = argument("reason").isEmpty ? text : argument("reason")
-            next.say(.steward, reason)
+            next.say(.steward, reason, blocks: blocks)
             next.state = .handedBack(note: "Over to you", date: .now)
         default:
             // A plain reply: treat it as a question back to the owner, so the
@@ -222,17 +241,42 @@ struct SampleTaskAgent: TaskAgent {
         switch (task.state, wake) {
         case (.working, .start):
             let question = "Before I start: anything I should know, like a budget, a date or a place?"
-            next.say(.steward, question)
+            next.say(.steward, question, blocks: [.choices(.init(options: ["No, go ahead", "Keep it cheap", "It's urgent"]))])
             next.state = .needsAnswer(question: question)
         case (.needsAnswer, .message), (.working, .message), (.waiting, .timer):
-            let result = "Sample result for “\(task.goal)”. Steward's real answer lands here: what it found, what it suggests, and what's left for you. Nothing here is real."
-            next.say(.steward, result)
+            let (result, blocks) = Self.sampleResult(for: task.goal)
+            next.say(.steward, result, blocks: blocks)
             next.result = result
             next.state = .done(date: .now, confirmedByOwner: false)
         default:
             next.say(.steward, "Noted. (Sample reply.)")
         }
         return next
+    }
+
+    /// A placeholder answer shaped like the real one would be: a comparison
+    /// for "compare", a plan for "plan", words otherwise. Labeled as sample.
+    static func sampleResult(for goal: String) -> (String, [ReplyBlock]) {
+        let lower = goal.lowercased()
+        if lower.contains("compare") || lower.contains("cheapest") || lower.contains("best price") {
+            return ("Sample comparison: the middle one is my pick. Nothing here is real.", [
+                .compare(.init(title: "Sample options", options: [
+                    .init(name: "Option A", detail: "Cheapest, but a 24-month contract.", price: "£8/mo"),
+                    .init(name: "Option B", detail: "Monthly rolling, cancel any time.", price: "£10/mo", isPick: true),
+                    .init(name: "What you have", detail: "Same data, no contract left.", price: "£22/mo"),
+                ])),
+            ])
+        }
+        if lower.contains("plan") || lower.contains("trip") || lower.contains("days") {
+            return ("Sample plan, in order. Nothing here is real.", [
+                .timeline(.init(title: "Sample plan", items: [
+                    .init(when: "First", title: "The thing that unblocks the rest", detail: "Book or confirm early."),
+                    .init(when: "Then", title: "The main part"),
+                    .init(when: "Last", title: "Wrap up", detail: "What to keep, and where."),
+                ])),
+            ])
+        }
+        return ("Sample result for “\(goal)”. Steward's real answer lands here: what it found, what it suggests, and what's left for you. Nothing here is real.", [])
     }
 }
 
@@ -244,7 +288,9 @@ extension StewardTask {
         var dentist = StewardTask(goal: "Find a dentist near me that takes my insurance", createdAt: day(-0.2))
         dentist.messages = [
             .init(author: .owner, text: "Find a dentist near me that takes my insurance", date: day(-0.2)),
-            .init(author: .steward, text: "Which insurer are you with, and which area should I search?", date: day(-0.19)),
+            .init(author: .steward, text: "Which insurer are you with, and which area should I search?", date: day(-0.19), blocks: [
+                .choices(.init(options: ["Near home", "Near work"])),
+            ]),
         ]
         dentist.state = .needsAnswer(question: "Which insurer are you with, and which area should I search?")
 
@@ -254,7 +300,13 @@ extension StewardTask {
             .init(author: .owner, text: "Plan 3 days in Lisbon in March", date: day(-4)),
             .init(author: .steward, text: "Any must-sees, or a pace you prefer?", date: day(-4)),
             .init(author: .owner, text: "Relaxed, lots of food, one day trip.", date: day(-3.9)),
-            .init(author: .steward, text: plan, date: day(-3.8)),
+            .init(author: .steward, text: "Three relaxed days, one train trip. Book the Sintra palace a week ahead.", date: day(-3.8), blocks: [
+                .timeline(.init(title: "3 days in Lisbon", items: [
+                    .init(when: "Day 1", title: "Alfama and the castle", detail: "Lunch at a tasca, sunset at Miradouro de Santa Luzia."),
+                    .init(when: "Day 2", title: "Belém", detail: "Pastéis de nata early, before the queue."),
+                    .init(when: "Day 3", title: "Sintra by train", detail: "40 min from Rossio. Palace tickets a week ahead."),
+                ])),
+            ]),
         ]
         lisbon.result = plan
         lisbon.state = .done(date: day(-3.8), confirmedByOwner: false)
@@ -266,7 +318,12 @@ extension StewardTask {
         var insurance = StewardTask(goal: "Remind me before the car insurance renews", createdAt: day(-2))
         insurance.messages = [
             .init(author: .owner, text: "Remind me before the car insurance renews", date: day(-2)),
-            .init(author: .steward, text: "It renews on 15 December. I'll come back two weeks before with cheaper quotes to compare.", date: day(-2)),
+            .init(author: .steward, text: "I'll come back two weeks before it renews, with cheaper quotes to compare.", date: day(-2), blocks: [
+                .deadline(.init(title: "Renews in 21 days", progress: 0.94, rows: [
+                    .init(label: "Quotes from Steward", value: day(19).formatted(.dateTime.month(.abbreviated).day())),
+                    .init(label: "Renews automatically", value: day(21).formatted(.dateTime.month(.abbreviated).day())),
+                ])),
+            ]),
         ]
         insurance.state = .waiting(until: day(19), note: "Quotes before renewal")
 

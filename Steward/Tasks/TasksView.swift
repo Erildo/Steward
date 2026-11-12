@@ -32,7 +32,7 @@ struct TasksView: View {
                     if let file = model.file(id) {
                         CaseDetailView(file: file)
                     } else if model.stewardTask(id) != nil {
-                        StewardTaskDetail(id: id)
+                        ConversationView(conversationID: id)
                     } else {
                         OwnerTaskDetail(id: id)
                     }

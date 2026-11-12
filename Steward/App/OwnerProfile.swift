@@ -79,6 +79,7 @@ struct ProfileSheet: View {
     @Environment(OwnerProfile.self) private var profile
     @Environment(\.dismiss) private var dismiss
     @State private var pick: PhotosPickerItem?
+    @AppStorage(Appearance.storageKey, store: Appearance.store) private var appearance = Appearance.light
 
     var body: some View {
         @Bindable var profile = profile
@@ -104,6 +105,11 @@ struct ProfileSheet: View {
                     Text("Name")
                 } footer: {
                     Text("Shown on your tasks. Kept on this phone until sign-in is ready.")
+                }
+                Section("Appearance") {
+                    Picker("Theme", selection: $appearance) {
+                        ForEach(Appearance.allCases) { Text($0.title).tag($0) }
+                    }
                 }
             }
             .navigationTitle("You")

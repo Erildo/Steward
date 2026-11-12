@@ -4,13 +4,22 @@ struct RootTabView: View {
     @AppStorage(Appearance.storageKey, store: Appearance.store) private var appearance = Appearance.light
     @State private var router = AppRouter()
     @State private var profile = OwnerProfile()
-    /// Owned here so the tab can badge what needs you before Tasks is opened.
-    @State private var tasks = TasksModel.launch()
+    /// Every conversation and task. Owned here so the tab can badge what
+    /// needs you, and so Chat and Tasks read the same threads.
+    @State private var tasks: TasksModel
+    /// Chat's engine: routes what the owner writes and runs the errand under way.
+    @State private var chat: ChatModel
+
+    init() {
+        let tasks = TasksModel.launch()
+        _tasks = State(initialValue: tasks)
+        _chat = State(initialValue: ChatModel.launch(tasks: tasks))
+    }
 
     var body: some View {
         TabView(selection: $router.tab) {
             Tab("Chat", systemImage: "bubble.left", value: AppTab.chat) {
-                ChatView()
+                ChatTab()
             }
             Tab("Feed", systemImage: "newspaper", value: AppTab.feed) {
                 FeedView()
@@ -32,6 +41,7 @@ struct RootTabView: View {
         .environment(router)
         .environment(profile)
         .environment(tasks)
+        .environment(chat)
         .preferredColorScheme(appearance.colorScheme)
     }
 }

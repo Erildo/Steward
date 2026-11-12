@@ -101,9 +101,9 @@ struct ErrandPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(errand.title).font(.headline).foregroundStyle(Palette.ink)
-            StepList(steps: errand.steps)
+            StepList(steps: errand.steps.map { .init(title: $0.title, state: $0.state) })
             HStack(spacing: 8) {
-                if errand.approval != .approved {
+                if errand.phase != .finished {
                     Button("Stop Errand", action: stop)
                         .buttonStyle(.bordered)
                         .tint(Palette.ink)

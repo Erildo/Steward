@@ -12,10 +12,21 @@ enum CaseService {
     /// True for the Tasks sample launches, which show sample errands.
     static let isTasksSample = launchState == "tasks" || launchState == "tasksEmpty"
 
+    /// Chat's debug launches: `chats` (sample conversations), `empty` (first
+    /// run), `errand` (the scripted demo) and `agent` (the simulated run).
+    static let isChatDebug = ["chats", "empty", "errand", "agent"].contains(launchState ?? "")
+
+    /// True for `-uiState chats`, which shows sample conversations.
+    static let isChatSample = launchState == "chats"
+
+    /// Debug launches keep tasks and conversations in a temporary folder,
+    /// never in the owner's own files.
+    static let usesScratchFiles = isTasksSample || isChatDebug
+
     /// Debug launches (the Tasks sample and the simulated agent run) keep their
     /// cases in a fresh temporary folder, so test cases never mix with the
     /// owner's own.
-    static let store: CaseStore = isTasksSample || launchState == "agent"
+    static let store: CaseStore = usesScratchFiles
         ? CaseStore(folder: URL.temporaryDirectory.appending(path: "cases-\(launchState ?? "debug")-\(UUID().uuidString)"))
         : CaseStore(folder: URL.documentsDirectory.appending(path: "Cases"))
 

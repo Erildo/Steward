@@ -2,70 +2,41 @@ import Foundation
 import Observation
 import StewardCore
 
-struct ChatMessage: Identifiable, Equatable {
-    enum Author { case owner, steward }
-    enum Status { case sending, delivered, failed }
-    enum Attachment: Equatable {
-        case progress(UUID)
-        case deadline(DeadlineInfo)
-        case approval(UUID)
-    }
-
-    let id: UUID
-    let author: Author
-    let text: String
-    let date: Date
-    var status: Status
-    var attachment: Attachment?
-
-    init(author: Author, text: String, date: Date = .now, status: Status = .delivered, attachment: Attachment? = nil) {
-        self.id = UUID()
-        self.author = author
-        self.text = text
-        self.date = date
-        self.status = status
-        self.attachment = attachment
-    }
-}
-
-/// Where replies come from. The real agent replaces `PreviewChatService`.
-protocol ChatService {
-    func reply(to text: String) async throws -> String
-}
-
-struct PreviewChatService: ChatService {
-    struct Unavailable: Error {}
-    var fails = false
-
-    func reply(to text: String) async throws -> String {
-        try await Task.sleep(for: .seconds(1.2))
-        if fails { throw Unavailable() }
-        return "I'm not connected yet, so I can't act on this. To see a demo, ask me to cancel something."
-    }
-}
-
+/// Chat's engine. Every conversation is a saved Steward task (see
+/// `TasksModel`), so Chats and Tasks show the same threads. This model routes
+/// what the owner writes and runs the one errand under way: the scripted demo
+/// while no agent is connected, or a real case through the runner. It writes
+/// what happens into the conversation as words and reply blocks, and drives
+/// the Steward pill.
 @MainActor
 @Observable
 final class ChatModel {
-    private(set) var messages: [ChatMessage]
-    private(set) var isStewardWorking = false
-    private(set) var errands: [UUID: Errand] = [:]
-    private(set) var activeErrandID: UUID?
-    private(set) var showsDone = false
-    var showsSampleLabel: Bool
+    let tasks: TasksModel
 
-    private let service: ChatService
-    private let pace: Duration = .seconds(1.8)
-    private var runTask: Task<Void, Never>?
-    /// Runs real errands through the agent. `nil` keeps chat on the scripted demo.
-    private let runner: CaseRunner?
-    /// The case whose question the owner's next message answers.
+    /// The errand under way, one at a time, and the conversation it runs in.
+    private(set) var errand: Errand?
+    private(set) var errandConversationID: UUID?
+    /// The message whose blocks show the errand's steps.
+    private var stepsMessageID: UUID?
+    /// The message holding the draft that waits for the owner's yes.
+    private(set) var approvalMessageID: UUID?
+    /// Steward is working on the errand right now (not the general agent).
+    private(set) var isErrandWorking = false
+    private(set) var showsDone = false
+    /// Bumps when the pill's Review is tapped, so the thread can scroll to the draft.
+    private(set) var reviewRequest = 0
+
+    /// Demo: Steward asked which email the membership is under.
+    private var awaitingDemoEmail = false
+    /// Agent run: the case whose question the owner's next message answers.
     private var questionCaseID: UUID?
 
-    init(messages: [ChatMessage], showsSampleLabel: Bool, service: ChatService, runner: CaseRunner? = nil) {
-        self.messages = messages
-        self.showsSampleLabel = showsSampleLabel
-        self.service = service
+    private let runner: CaseRunner?
+    private let pace: Duration = .seconds(1.8)
+    private var runTask: Task<Void, Never>?
+
+    init(tasks: TasksModel, runner: CaseRunner?) {
+        self.tasks = tasks
         self.runner = runner
         runner?.observe { [weak self] before, after, origin in
             guard origin != .chat else { return }
@@ -73,381 +44,483 @@ final class ChatModel {
         }
     }
 
-    /// The owner acted on a chat errand from Tasks: show the same outcome
-    /// here, as if they had tapped the card in chat.
-    private func caughtUp(_ before: CaseFile, _ after: CaseFile) {
-        let id = after.id
-        guard errands[id] != nil else { return }
-        let newEvents = after.events.dropFirst(before.events.count)
-        if errands[id]?.approval == .pending {
-            if newEvents.contains(where: { $0.kind == "email_out" }) {
-                errands[id]?.approval = .approved
-            } else if newEvents.contains(where: { $0.kind == "owner_declined" }) {
-                errands[id]?.approval = .declined
-            }
-        }
-        if questionCaseID == id, let answer = newEvents.first(where: { $0.kind == "owner_answer" }) {
-            questionCaseID = nil
-            messages.append(ChatMessage(author: .owner, text: answer.detail))
-        }
-        if case .closed = after.state, errands[id]?.phase == .finished { return }
-        show(after, newEvents: newEvents)
-    }
-
-    var activeErrand: Errand? { activeErrandID.flatMap { errands[$0] } }
+    // MARK: Reading
 
     var activity: StewardActivity {
         if showsDone { return .done }
-        guard let errand = activeErrand else { return .idle }
+        guard let errand else { return .idle }
         if errand.phase == .needsYou { return .needsYou }
         guard let index = errand.steps.firstIndex(where: { $0.state == .active }) else { return .idle }
         return .working(step: errand.steps[index].activeTitle, number: index + 1, total: errand.steps.count)
     }
 
-    var pendingApprovalMessageID: UUID? {
-        guard let id = activeErrandID else { return nil }
-        return messages.last { $0.attachment == .approval(id) }?.id
+    /// Steward is busy in this conversation, on an errand or a general task.
+    func isWorking(in id: UUID) -> Bool {
+        (isErrandWorking && errandConversationID == id) || tasks.working.contains(id)
     }
 
-    func send(_ raw: String) {
+    /// Whether a draft in this conversation can still be approved here.
+    func isLive(_ draft: ReplyBlock.Draft, message messageID: UUID, in id: UUID) -> Bool {
+        guard draft.status == .pending else { return false }
+        if let caseID = draft.caseID {
+            guard let file = runner?.cases[caseID] ?? tasks.file(caseID), case .needsApproval = file.state else { return false }
+            return true
+        }
+        return errandConversationID == id && approvalMessageID == messageID
+    }
+
+    /// False when nothing really goes out: the demo, or the simulated run.
+    func sendsForReal(_ draft: ReplyBlock.Draft) -> Bool {
+        draft.caseID != nil && runner != nil && runner?.isSimulated == false
+    }
+
+    // MARK: The owner writes
+
+    /// Sends the owner's words, starting a conversation when `id` is nil.
+    /// Returns the conversation they went to.
+    @discardableResult
+    func send(_ raw: String, in id: UUID?) -> UUID? {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        if let id = questionCaseID, !isStewardWorking {
-            messages.append(ChatMessage(author: .owner, text: text))
+        guard !text.isEmpty else { return id }
+        let wantsErrand = Self.isErrandRequest(text)
+
+        guard let id else {
+            let id = tasks.startConversation(text, wakes: !(wantsErrand && errand == nil))
+            if wantsErrand, errand == nil, let id { startErrand(in: id) }
+            return id
+        }
+        if id == errandConversationID, awaitingDemoEmail {
+            tasks.post(id, .owner, text)
+            awaitingDemoEmail = false
+            runTask = Task { await continueDemo(id) }
+            return id
+        }
+        if id == errandConversationID, let caseID = questionCaseID, !isErrandWorking {
+            tasks.post(id, .owner, text)
             questionCaseID = nil
-            errands[id]?.phase = .running
-            if let index = errands[id]?.steps.firstIndex(where: { $0.state == .waiting }) {
-                setStep(id, index, .active)
+            errand?.phase = .running
+            if let index = errand?.steps.firstIndex(where: { $0.state == .waiting }) { setStep(index, .active) }
+            tasks.setState(id, .working)
+            runTask = Task { await advance(caseID) { try await $0.wake(caseID, with: .answer(text)) } }
+            return id
+        }
+        if wantsErrand {
+            tasks.post(id, .owner, text)
+            if errand == nil {
+                startErrand(in: id)
+            } else {
+                tasks.post(id, .steward, "I'm already on one errand. Finish or stop it first, and I'll start this one.")
             }
-            runTask = Task { await advance(id) { try await $0.wake(id, with: .answer(text)) } }
+            return id
+        }
+        tasks.send(id, text)
+        return id
+    }
+
+    /// "Cancel my…" starts an errand; so does the demo's own button. Narrow
+    /// on purpose, so "don't cancel anything yet" stays a message.
+    static func isErrandRequest(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        return text == TasksModel.demoChoice || lower.hasPrefix("cancel ") || lower.contains("cancel my ")
+    }
+
+    // MARK: Drafts
+
+    func approve(message messageID: UUID, in id: UUID) {
+        guard let draft = draft(messageID, in: id), isLive(draft, message: messageID, in: id) else { return }
+        setDraftStatus(.approved, message: messageID, in: id)
+        errand?.phase = .running
+        tasks.setState(id, .working)
+        if let caseID = draft.caseID, let runner, case .needsApproval(let callID, let original) = runner.cases[caseID]?.state {
+            let edited = draft.body == original.body ? nil : draft.body
+            if errand?.id == caseID { setStage(1, .active) }
+            runTask = Task { await advance(caseID) { try await $0.wake(caseID, with: .approval(callID: callID, approved: true, editedBody: edited)) } }
             return
         }
-        if text.lowercased().contains("cancel"), activeErrandID == nil {
-            messages.append(ChatMessage(author: .owner, text: text))
-            if runner != nil { startAgentErrand() } else { startDemoErrand() }
-            return
-        }
-        let message = ChatMessage(author: .owner, text: text, status: .sending)
-        messages.append(message)
-        Task { await deliver(message.id, text: text) }
+        setStep(3, .active)
+        runTask = Task { await finishDemo(id) }
     }
 
-    func runDemoFromMenu() {
-        guard activeErrandID == nil else { return }
-        messages.append(ChatMessage(author: .owner, text: "Cancel my gym membership."))
-        startDemoErrand()
-    }
-
-    func retry(_ id: UUID) {
-        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
-        messages[index].status = .sending
-        let text = messages[index].text
-        Task { await deliver(id, text: text) }
-    }
-
-    func startNewConversation() {
-        runTask?.cancel()
-        messages = []
-        errands = [:]
-        activeErrandID = nil
-        questionCaseID = nil
-        showsDone = false
-        showsSampleLabel = false
-        isStewardWorking = false
-    }
-
-    // MARK: Errand actions
-
-    func approve(_ id: UUID) {
-        guard errands[id]?.approval == .pending else { return }
-        errands[id]?.approval = .approved
-        errands[id]?.phase = .running
-        if let file = runner?.cases[id], case .needsApproval(let callID, let draft) = file.state {
-            let body = errands[id]?.messageBody
-            let edited = body == draft.body ? nil : body
-            setStage(id, 1, .active)
-            runTask = Task { await advance(id) { try await $0.wake(id, with: .approval(callID: callID, approved: true, editedBody: edited)) } }
-            return
-        }
-        setStep(id, 3, .active)
-        runTask = Task { await finishAfterApproval(id) }
-    }
-
-    func decline(_ id: UUID) {
-        guard errands[id]?.approval == .pending else { return }
-        if let file = runner?.cases[id] {
+    func decline(message messageID: UUID, in id: UUID) {
+        guard let draft = draft(messageID, in: id), isLive(draft, message: messageID, in: id) else { return }
+        setDraftStatus(.declined, message: messageID, in: id)
+        if let caseID = draft.caseID, let runner, case .needsApproval(let callID, _) = runner.cases[caseID]?.state {
             // The agent hears the no and decides what's next; usually it closes.
-            errands[id]?.approval = .declined
-            errands[id]?.phase = .running
-            setStage(id, 1, .active)
-            guard case .needsApproval(let callID, _) = file.state else { return }
-            runTask = Task { await advance(id) { try await $0.wake(id, with: .approval(callID: callID, approved: false, reason: "The owner declined this draft.")) } }
+            errand?.phase = .running
+            if errand?.id == caseID { setStage(1, .active) }
+            runTask = Task { await advance(caseID) { try await $0.wake(caseID, with: .approval(callID: callID, approved: false, reason: "The owner declined this draft.")) } }
             return
         }
-        close(id)
-        say("Okay, nothing was sent. Your membership stays as it is.")
+        close()
+        tasks.setState(id, .stopped(date: .now))
+        tasks.post(id, .steward, "Okay, nothing was sent. Your membership stays as it is.")
     }
 
-    func stopActiveErrand() {
-        guard let id = activeErrandID else { return }
-        runTask?.cancel()
-        if questionCaseID == id { questionCaseID = nil }
-        close(id)
-        say("Stopped. Nothing was sent.")
-    }
-
-    func updateMessageBody(_ body: String, for id: UUID) {
-        errands[id]?.messageBody = body
-    }
-
-    private func close(_ id: UUID) {
-        if errands[id]?.approval == .pending { errands[id]?.approval = .declined }
-        errands[id]?.phase = .stopped
-        if let steps = errands[id]?.steps {
-            for index in steps.indices where steps[index].state != .done {
-                errands[id]?.steps[index].state = .pending
+    func editDraft(message messageID: UUID, in id: UUID, body: String) {
+        guard let index = blockIndex(messageID, in: id, where: { if case .draft = $0 { true } else { false } }) else { return }
+        tasks.editBlock(id, messageID, at: index) { block in
+            if case .draft(var draft) = block {
+                draft.body = body
+                block = .draft(draft)
             }
         }
-        activeErrandID = nil
+    }
+
+    func stopErrand() {
+        guard let id = errandConversationID else { return }
+        runTask?.cancel()
+        if let messageID = approvalMessageID, let draft = draft(messageID, in: id), draft.status == .pending {
+            setDraftStatus(.declined, message: messageID, in: id)
+        }
+        questionCaseID = nil
+        awaitingDemoEmail = false
+        close()
+        isErrandWorking = false
+        tasks.setState(id, .stopped(date: .now))
+        tasks.post(id, .steward, "Stopped. Nothing was sent.")
+    }
+
+    /// The pill's Review: the thread scrolls to the waiting draft.
+    func review() { reviewRequest += 1 }
+
+    // MARK: Errands
+
+    private func startErrand(in id: UUID) {
+        if runner != nil { startAgentErrand(in: id) } else { startDemo(in: id) }
+    }
+
+    private func begin(_ errand: Errand, in id: UUID) {
+        runTask?.cancel()
+        self.errand = errand
+        errandConversationID = id
+        approvalMessageID = nil
+        stepsMessageID = nil
+        showsDone = false
+        tasks.setState(id, .working)
+    }
+
+    private func close() {
+        errand?.phase = .stopped
+        if let steps = errand?.steps {
+            for index in steps.indices where steps[index].state != .done { errand?.steps[index].state = .pending }
+        }
+        syncSteps()
+        errand = nil
+        awaitingDemoEmail = false
+        questionCaseID = nil
+    }
+
+    @discardableResult
+    private func say(_ text: String, _ blocks: [ReplyBlock] = [], in id: UUID) -> UUID? {
+        tasks.post(id, .steward, text, blocks: blocks)
+    }
+
+    // MARK: Scripted demo
+
+    private func startDemo(in id: UUID) {
+        begin(.demoGymCancellation(), in: id)
+        setStep(0, .active, sync: false)
+        stepsMessageID = say("On it. I'll check your notice period first, so you don't pay for another month.", [errand!.stepsBlock], in: id)
+        runTask = Task {
+            do { try await Task.sleep(for: pace) } catch { return }
+            setStep(0, .waiting)
+            errand?.phase = .needsYou
+            awaitingDemoEmail = true
+            let question = "Which email is your membership under?"
+            say(question, [.field(.init(label: "Membership email", kind: .email, placeholder: "name@example.com"))], in: id)
+            tasks.setState(id, .needsAnswer(question: question))
+        }
+    }
+
+    private func continueDemo(_ id: UUID) async {
+        do {
+            errand?.phase = .running
+            tasks.setState(id, .working)
+            setStep(0, .done)
+            setStep(1, .active)
+            try await Task.sleep(for: pace)
+            setStep(1, .done)
+            setStep(2, .active)
+            let calendar = Calendar.current
+            let lastDay = calendar.date(byAdding: .day, value: 6, to: .now) ?? .now
+            let payment = calendar.date(byAdding: .day, value: 7, to: .now) ?? .now
+            say("You have 6 days. After that you pay for one more month.", [.deadline(.init(
+                title: "6 days left to cancel", progress: 0.8,
+                rows: [.init(label: "Last day to cancel", value: Self.day(lastDay)),
+                       .init(label: "Next payment, $39", value: Self.day(payment))]
+            ))], in: id)
+            try await Task.sleep(for: pace)
+            setStep(2, .done)
+            setStep(3, .waiting)
+            errand?.phase = .needsYou
+            approvalMessageID = say("Here's exactly what I'll send. Nothing goes until you say yes.", [.draft(.init(
+                to: "members@northside-gym.example",
+                subject: "Please cancel my membership",
+                body: "Hello,\n\nPlease cancel my membership and confirm the date it ends. I'm giving notice within the period in your terms.\n\nThank you."
+            ))], in: id)
+            tasks.setState(id, .needsAnswer(question: "Approve the email to Northside Gym"))
+        } catch {}
+    }
+
+    private func finishDemo(_ id: UUID) async {
+        do {
+            try await Task.sleep(for: pace)
+            setStep(3, .done)
+            setStep(4, .active)
+            try await Task.sleep(for: pace)
+            setStep(4, .done)
+            let summary = "Your membership is cancelled, and you won't be charged again."
+            say("Done. \(summary)", [.proof(.init(
+                headline: "Membership cancelled",
+                detail: "No more payments after \(Self.day(Calendar.current.date(byAdding: .day, value: 6, to: .now) ?? .now)).",
+                quote: "We've cancelled your membership as requested. No further payments will be taken.",
+                source: "Northside Gym (demo)",
+                date: .now
+            ))], in: id)
+            errand?.phase = .finished
+            errand = nil
+            tasks.setState(id, .done(date: .now, confirmedByOwner: false), result: summary)
+            await flashDone()
+        } catch {}
+    }
+
+    private func flashDone() async {
+        showsDone = true
+        try? await Task.sleep(for: .seconds(3))
+        if !Task.isCancelled { showsDone = false }
     }
 
     // MARK: Agent run
 
-    private func startAgentErrand() {
+    private func startAgentErrand(in id: UUID) {
         guard let runner else { return }
         let file = SimulatedErrand.gymCancellation()
         do {
             try runner.open(file)
         } catch {
-            say("I couldn't save this errand on your phone, so I haven't started it.")
+            say("I couldn't save this errand on your phone, so I haven't started it.", in: id)
             return
         }
-        let errand = Errand.agentErrand(id: file.id, title: SimulatedErrand.title, label: runner.isSimulated ? "Simulated" : nil)
-        errands[errand.id] = errand
-        activeErrandID = errand.id
-        showsDone = false
-        setStage(file.id, 0, .active)
-        say("On it. I'll write to \(file.company.name) and show you the email before anything goes out.", attachment: .progress(file.id))
+        tasks.setCase(id, file.id)
+        begin(.agentErrand(id: file.id, title: SimulatedErrand.title, label: runner.isSimulated ? "Simulated" : nil), in: id)
+        setStage(0, .active, sync: false)
+        stepsMessageID = say("On it. I'll write to \(file.company.name) and show you the email before anything goes out.", [errand!.stepsBlock], in: id)
         runTask = Task { await advance(file.id) { try await $0.wake(file.id, with: .start) } }
     }
 
     /// Wakes the agent through `work`, then shows where the case now stands.
-    private func advance(_ id: UUID, _ work: (CaseRunner) async throws -> CaseFile?) async {
-        guard let runner, let before = runner.cases[id] else { return }
-        isStewardWorking = true
+    private func advance(_ caseID: UUID, _ work: (CaseRunner) async throws -> CaseFile?) async {
+        guard let runner, let before = runner.cases[caseID] else { return }
+        isErrandWorking = true
         do {
             let file = try await work(runner)
-            isStewardWorking = false
+            isErrandWorking = false
             guard !Task.isCancelled, let file else { return }
             show(file, newEvents: file.events.dropFirst(before.events.count))
         } catch {
-            isStewardWorking = false
-            guard !Task.isCancelled else { return }
-            close(id)
-            say("I couldn't finish that step, so I've paused this errand. Nothing more goes out without your OK.")
+            isErrandWorking = false
+            guard !Task.isCancelled, let id = conversationID(for: caseID) else { return }
+            if errand?.id == caseID { close() }
+            tasks.setState(id, .handedBack(note: "Paused after a problem", date: .now))
+            say("I couldn't finish that step, so I've paused this errand. Nothing more goes out without your OK.", in: id)
         }
     }
 
+    private func conversationID(for caseID: UUID) -> UUID? {
+        if errand?.id == caseID, let id = errandConversationID { return id }
+        return tasks.conversation(carrying: caseID)?.id
+    }
+
+    /// The owner acted on a chat errand from Tasks: show the same outcome
+    /// here, as if they had tapped it in chat.
+    private func caughtUp(_ before: CaseFile, _ after: CaseFile) {
+        guard let id = conversationID(for: after.id) else { return }
+        let newEvents = after.events.dropFirst(before.events.count)
+        if let messageID = pendingDraftMessage(for: after.id, in: id) {
+            if newEvents.contains(where: { $0.kind == "email_out" }) {
+                setDraftStatus(.approved, message: messageID, in: id)
+            } else if newEvents.contains(where: { $0.kind == "owner_declined" }) {
+                setDraftStatus(.declined, message: messageID, in: id)
+            }
+        }
+        if questionCaseID == after.id, let answer = newEvents.first(where: { $0.kind == "owner_answer" }) {
+            questionCaseID = nil
+            tasks.post(id, .owner, answer.detail)
+        }
+        show(after, newEvents: newEvents)
+    }
+
     private func show(_ file: CaseFile, newEvents: ArraySlice<CaseFile.Event>) {
-        let id = file.id
+        guard let id = conversationID(for: file.id) else { return }
+        let isLive = errand?.id == file.id
         if newEvents.contains(where: { $0.kind == "email_in" }) {
-            say("\(file.company.name) replied. Reading it now.")
+            say("\(file.company.name) replied. Reading it now.", in: id)
         }
         switch file.state {
         case .new:
             break
         case .needsApproval(_, let draft):
-            errands[id]?.recipient = draft.to
-            errands[id]?.subject = draft.subject
-            errands[id]?.messageBody = draft.body
-            errands[id]?.approval = .pending
-            errands[id]?.phase = .needsYou
-            setStage(id, 1, .waiting)
-            say("Here's exactly what I'll send. Nothing goes until you say yes.", attachment: .approval(id))
+            guard pendingDraftMessage(for: file.id, in: id) == nil else { return }
+            if isLive {
+                errand?.phase = .needsYou
+                setStage(1, .waiting)
+            }
+            approvalMessageID = say("Here's exactly what I'll send. Nothing goes until you say yes.",
+                                    [.draft(.init(to: draft.to, subject: draft.subject, body: draft.body, caseID: file.id))], in: id)
+            tasks.setState(id, .needsAnswer(question: "Approve the email to \(file.company.name)"))
         case .needsAnswer(_, let question):
-            errands[id]?.phase = .needsYou
-            if let index = errands[id]?.steps.firstIndex(where: { $0.state == .active }) {
-                setStep(id, index, .waiting)
+            if isLive {
+                errand?.phase = .needsYou
+                if let index = errand?.steps.firstIndex(where: { $0.state == .active }) { setStep(index, .waiting) }
             }
-            questionCaseID = id
-            say(question)
+            questionCaseID = file.id
+            say(question, in: id)
+            tasks.setState(id, .needsAnswer(question: question))
         case .waitingForReply(_, let until):
-            errands[id]?.phase = .running
-            setStage(id, 2, .active)
-            if newEvents.contains(where: { $0.kind == "email_out" }) {
-                say("Sent to \(file.company.name). I'll watch for their reply and pick it up as soon as it lands.")
-            } else {
-                say("I'm waiting for \(file.company.name) to reply, until \(until.formatted(.dateTime.month(.wide).day())) at the latest.")
+            if isLive {
+                errand?.phase = .running
+                setStage(2, .active)
             }
-            if runner?.isSimulated == true {
-                runTask = Task { await collectSimulatedReply(id) }
+            if newEvents.contains(where: { $0.kind == "email_out" }) {
+                say("Sent to \(file.company.name). I'll watch for their reply and pick it up as soon as it lands.", in: id)
+            } else {
+                say("I'm waiting for \(file.company.name) to reply, until \(until.formatted(.dateTime.month(.wide).day())) at the latest.", in: id)
+            }
+            tasks.setState(id, .waiting(until: until, note: "Waiting for \(file.company.name)"))
+            if runner?.isSimulated == true, isLive {
+                runTask = Task { await collectSimulatedReply(file.id) }
             }
         case .closed:
-            finish(file)
+            finish(file, in: id)
         }
     }
 
-    private func finish(_ file: CaseFile) {
-        let id = file.id
+    private func finish(_ file: CaseFile, in id: UUID) {
         guard let closure = file.closure, closure.status == .done else {
-            close(id)
-            say(file.closure?.summary ?? "I've stopped this errand.")
+            if errand?.id == file.id { close() }
+            let summary = file.closure?.summary ?? "I've stopped this errand."
+            say(summary, in: id)
+            tasks.setState(id, file.closure?.status == .needsOwner
+                ? .handedBack(note: "Over to you", date: .now)
+                : .stopped(date: .now), result: summary)
             return
         }
-        setStage(id, errands[id]?.steps.count ?? 0, .done)
-        errands[id]?.phase = .finished
-        activeErrandID = nil
-        showsDone = true
-        say("Done. \(closure.summary)")
-        if !closure.evidence.isEmpty {
-            say("In their words: \u{201C}\(closure.evidence)\u{201D}")
+        if errand?.id == file.id {
+            setStage(errand?.steps.count ?? 0, .done)
+            errand = nil
         }
-        runTask = Task {
-            try? await Task.sleep(for: .seconds(3))
-            if !Task.isCancelled { showsDone = false }
-        }
+        say("Done. \(closure.summary)", [.proof(.init(
+            headline: "Confirmed by \(file.company.name)",
+            detail: closure.summary,
+            quote: closure.evidence.isEmpty ? nil : closure.evidence,
+            source: file.company.email,
+            date: closure.date
+        ))], in: id)
+        tasks.setState(id, .done(date: closure.date, confirmedByOwner: false), result: closure.summary)
+        runTask = Task { await flashDone() }
     }
 
     /// Simulated relay only: the company's reply arrives a moment after sending.
-    private func collectSimulatedReply(_ id: UUID) async {
+    private func collectSimulatedReply(_ caseID: UUID) async {
         do { try await Task.sleep(for: pace * 2) } catch { return }
-        setStage(id, 3, .active)
-        await advance(id) { try await $0.collectMail(for: id) }
-        if runner?.cases[id]?.inbox.isEmpty == true, case .waitingForReply = runner?.cases[id]?.state {
-            setStage(id, 2, .active)
+        setStage(3, .active)
+        await advance(caseID) { try await $0.collectMail(for: caseID) }
+        if runner?.cases[caseID]?.inbox.isEmpty == true, case .waitingForReply = runner?.cases[caseID]?.state {
+            setStage(2, .active)
         }
     }
+
+    // MARK: Steps and blocks
 
     /// Marks steps before `index` done, `index` as `state`, and the rest not started.
-    private func setStage(_ id: UUID, _ index: Int, _ state: Errand.StepState) {
-        guard let count = errands[id]?.steps.count else { return }
+    private func setStage(_ index: Int, _ state: Errand.StepState, sync: Bool = true) {
+        guard let count = errand?.steps.count else { return }
         for step in 0..<count {
-            setStep(id, step, step < index ? .done : step == index ? state : .pending)
+            errand?.steps[step].state = step < index ? .done : step == index ? state : .pending
+        }
+        if sync { syncSteps() }
+    }
+
+    private func setStep(_ index: Int, _ state: Errand.StepState, sync: Bool = true) {
+        guard let steps = errand?.steps, steps.indices.contains(index) else { return }
+        errand?.steps[index].state = state
+        if sync { syncSteps() }
+    }
+
+    /// Writes the errand's steps into its steps block, so the record matches.
+    private func syncSteps() {
+        guard let errand, let id = errandConversationID, let messageID = stepsMessageID,
+              let index = blockIndex(messageID, in: id, where: { if case .steps = $0 { true } else { false } })
+        else { return }
+        tasks.editBlock(id, messageID, at: index) { $0 = errand.stepsBlock }
+    }
+
+    private func draft(_ messageID: UUID, in id: UUID) -> ReplyBlock.Draft? {
+        tasks.stewardTask(id)?.messages.first { $0.id == messageID }?.allBlocks.lazy.compactMap { block -> ReplyBlock.Draft? in
+            if case .draft(let draft) = block { draft } else { nil }
+        }.first
+    }
+
+    private func pendingDraftMessage(for caseID: UUID, in id: UUID) -> UUID? {
+        tasks.stewardTask(id)?.messages.last { message in
+            message.allBlocks.contains { block in
+                if case .draft(let draft) = block { draft.caseID == caseID && draft.status == .pending } else { false }
+            }
+        }?.id
+    }
+
+    private func setDraftStatus(_ status: ReplyBlock.Draft.Status, message messageID: UUID, in id: UUID) {
+        guard let index = blockIndex(messageID, in: id, where: { if case .draft = $0 { true } else { false } }) else { return }
+        tasks.editBlock(id, messageID, at: index) { block in
+            if case .draft(var draft) = block {
+                draft.status = status
+                block = .draft(draft)
+            }
         }
     }
 
-    // MARK: Scripted run
-
-    private func startDemoErrand() {
-        let errand = Errand.demoGymCancellation()
-        errands[errand.id] = errand
-        activeErrandID = errand.id
-        showsDone = false
-        runTask = Task { await runUntilApproval(errand.id) }
+    private func blockIndex(_ messageID: UUID, in id: UUID, where match: (ReplyBlock) -> Bool) -> Int? {
+        tasks.stewardTask(id)?.messages.first { $0.id == messageID }?.allBlocks.firstIndex(where: match)
     }
 
-    private func runUntilApproval(_ id: UUID) async {
-        do {
-            setStep(id, 0, .active)
-            say("On it. I'll check your notice period first, so you don't pay for another month.", attachment: .progress(id))
-            try await Task.sleep(for: pace)
-            setStep(id, 0, .done)
-            setStep(id, 1, .active)
-            try await Task.sleep(for: pace)
-            setStep(id, 1, .done)
-            setStep(id, 2, .active)
-            say("You have 6 days. After that you pay for one more month.", attachment: .deadline(Self.demoDeadline()))
-            try await Task.sleep(for: pace)
-            setStep(id, 2, .done)
-            setStep(id, 3, .waiting)
-            errands[id]?.phase = .needsYou
-            errands[id]?.approval = .pending
-            say("Here's exactly what I'll send. Nothing goes until you say yes.", attachment: .approval(id))
-        } catch {}
-    }
-
-    private func finishAfterApproval(_ id: UUID) async {
-        do {
-            try await Task.sleep(for: pace)
-            setStep(id, 3, .done)
-            setStep(id, 4, .active)
-            try await Task.sleep(for: pace)
-            setStep(id, 4, .done)
-            errands[id]?.phase = .finished
-            activeErrandID = nil
-            showsDone = true
-            say("Done. Your cancellation went through, and you won't be charged again.")
-            try await Task.sleep(for: .seconds(3))
-            showsDone = false
-        } catch {}
-    }
-
-    private func setStep(_ id: UUID, _ index: Int, _ state: Errand.StepState) {
-        errands[id]?.steps[index].state = state
-    }
-
-    private func say(_ text: String, attachment: ChatMessage.Attachment? = nil) {
-        messages.append(ChatMessage(author: .steward, text: text, attachment: attachment))
-    }
-
-    private static func demoDeadline() -> DeadlineInfo {
-        let calendar = Calendar.current
-        return DeadlineInfo(
-            daysLeft: 6,
-            elapsedFraction: 0.8,
-            lastDay: calendar.date(byAdding: .day, value: 6, to: .now) ?? .now,
-            nextPayment: calendar.date(byAdding: .day, value: 7, to: .now) ?? .now,
-            amount: "$39"
-        )
-    }
-
-    private func deliver(_ id: UUID, text: String) async {
-        isStewardWorking = true
-        defer { isStewardWorking = false }
-        do {
-            let reply = try await service.reply(to: text)
-            setStatus(.delivered, for: id)
-            messages.append(ChatMessage(author: .steward, text: reply))
-        } catch {
-            setStatus(.failed, for: id)
-        }
-    }
-
-    private func setStatus(_ status: ChatMessage.Status, for id: UUID) {
-        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
-        messages[index].status = status
+    private static func day(_ date: Date) -> String {
+        date.formatted(.dateTime.month(.abbreviated).day())
     }
 }
 
 extension ChatModel {
-    /// Reads `-uiState empty|failed|long|errand|agent` so each state can be launched and checked directly.
-    static func launch() -> ChatModel {
-        let state = UserDefaults.standard.string(forKey: "uiState")
-        let service = PreviewChatService(fails: state == "failed")
-        switch state {
-        case "empty":
-            return ChatModel(messages: [], showsSampleLabel: false, service: service)
-        case "failed":
-            let failed = ChatMessage(author: .owner, text: "My email is on the account, go ahead.", status: .failed)
-            return ChatModel(messages: sample() + [failed], showsSampleLabel: true, service: service)
-        case "long":
-            let long = ChatMessage(author: .steward, text: String(repeating: "Your gym's terms ask for thirty days' written notice, and the next payment leaves on the fourteenth. ", count: 6))
-            return ChatModel(messages: sample() + [long], showsSampleLabel: true, service: service)
-        case "agent":
-            // A real agent run on a sample case, with simulated mail and company.
-            let model = ChatModel(messages: [], showsSampleLabel: false, service: service, runner: CaseService.runner)
-            model.send("Cancel my gym membership.")
-            return model
-        case "errand":
-            let model = ChatModel(messages: [], showsSampleLabel: false, service: service)
-            model.runDemoFromMenu()
-            return model
+    /// `-uiState errand` starts the scripted demo and `-uiState agent` the
+    /// simulated agent run, each in a fresh conversation. Other states read
+    /// whatever conversations the store holds (see `CaseService`).
+    static func launch(tasks: TasksModel) -> ChatModel {
+        let model = ChatModel(tasks: tasks, runner: CaseService.runner)
+        switch UserDefaults.standard.string(forKey: "uiState") {
+        case "errand", "agent":
+            model.send("Cancel my gym membership.", in: nil)
         default:
-            return ChatModel(messages: sample(), showsSampleLabel: true, service: service)
+            break
         }
+        return model
     }
+}
 
-    private static func sample() -> [ChatMessage] {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: .now)
-        let nineToday = calendar.date(bySettingHour: 9, minute: 2, second: 0, of: today) ?? today
-        let evening = calendar.date(byAdding: .minute, value: -319, to: today) ?? today
-        return [
-            ChatMessage(author: .owner, text: "Can you cancel my gym membership? They just put it up again.", date: evening),
-            ChatMessage(author: .steward, text: "Yes. I'll check the notice period first, so you aren't charged for another month.", date: evening),
-            ChatMessage(author: .steward, text: "Nothing gets sent until you've read it and said yes.", date: evening),
-            ChatMessage(author: .owner, text: "Ok, what do you need from me?", date: nineToday),
-            ChatMessage(author: .steward, text: "Just your membership email. I'll do the rest.", date: nineToday),
+extension StewardTask {
+    /// Extra conversations for `-uiState chats`: a finished errand with its
+    /// proof, beside the sample tasks. Companies are fictional.
+    static func chatSamples(now: Date = .now) -> [StewardTask] {
+        func day(_ offset: Double) -> Date { now.addingTimeInterval(offset * 86_400) }
+        var mealKit = StewardTask(goal: "Cancel my meal kit subscription", createdAt: day(-9))
+        mealKit.messages = [
+            .init(author: .owner, text: "Cancel my meal kit subscription", date: day(-9)),
+            .init(author: .steward, text: "Done. Fresh Fork cancelled it, and no more boxes or charges will come.", date: day(-8), blocks: [
+                .proof(.init(headline: "Confirmed by Fresh Fork", detail: "No more boxes or charges.",
+                             quote: "We can confirm your subscription has been cancelled and no further payments will be taken.",
+                             source: "help@freshfork.example", date: day(-8))),
+            ]),
         ]
+        mealKit.state = .done(date: day(-8), confirmedByOwner: false)
+        mealKit.result = "Fresh Fork cancelled the subscription."
+        mealKit.pinned = true
+        return [mealKit]
     }
 }
