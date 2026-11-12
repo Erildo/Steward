@@ -32,16 +32,16 @@ enum TaskItem: Identifiable {
     }
 }
 
-/// Which list Tasks shows: what the owner handed to Steward, or their own to-dos.
+/// Which list Tasks shows: the owner's own to-dos, or what they handed to Steward.
 enum TaskScope: String, CaseIterable, Identifiable {
-    case steward, mine
+    case mine, steward
 
     var id: Self { self }
 
     var title: String {
         switch self {
-        case .steward: "Steward"
         case .mine: "Mine"
+        case .steward: "Steward"
         }
     }
 

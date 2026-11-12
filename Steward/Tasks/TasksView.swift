@@ -12,8 +12,8 @@ struct TasksView: View {
     @State private var adding: AddRequest?
     @State private var showsProfile = false
     @State private var showsArchive = false
-    /// Which list shows. Remembered between launches.
-    @AppStorage("tasks.scope") private var scope = TaskScope.steward
+    /// Which list shows. Yours first; remembered between launches.
+    @AppStorage("tasks.list") private var scope = TaskScope.mine
     /// Sections the owner folded away, per list. Done starts folded in both.
     @AppStorage("tasks.folded") private var foldedRaw = "mine.done,steward.done"
     /// Sections showing every row, past the first few.
@@ -145,7 +145,7 @@ struct TasksView: View {
             Section {
                 Button { scope = .steward } label: {
                     HStack(spacing: 12) {
-                        StewardAvatar(size: 28, blinks: false, neutral: true)
+                        StewardAvatar(size: 28, blinks: false)
                         Text(model.needsYouCount == 1 ? "Steward needs you on 1 task" : "Steward needs you on \(model.needsYouCount) tasks")
                             .font(.subheadline.weight(.medium))
                             .foregroundStyle(Palette.ink)
@@ -287,27 +287,97 @@ enum TaskSection: String, Hashable {
     }
 }
 
-/// The switch between Steward's list and yours, first thing under the title.
-/// Steward's side carries a count while it waits on you, like the tab badge.
+/// The switch between your list and Steward's, first thing under the title.
+/// Each side carries its face, so you know which is which without reading.
+/// The system segmented control can't hold an avatar, so this draws its own
+/// and hands VoiceOver the real one.
 private struct ScopePicker: View {
     @Binding var scope: TaskScope
 
     @Environment(TasksModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var thumb
+    @ScaledMetric(relativeTo: .subheadline) private var face: CGFloat = 24
+
+    /// The raised pill under the chosen side.
+    private static let thumbFill = Palette.dynamic(light: 0xFFFFFF, dark: 0x2A303C)
 
     var body: some View {
-        Picker("List", selection: $scope) {
-            ForEach(TaskScope.allCases) { scope in
-                Text(label(scope)).tag(scope)
+        HStack(spacing: 0) {
+            ForEach(TaskScope.allCases) { option in
+                // Borderless, so each side keeps its own tap inside the list row.
+                Button { choose(option) } label: { segment(option) }
+                    .buttonStyle(.borderless)
             }
         }
-        .pickerStyle(.segmented)
-        .controlSize(.large)
+        .padding(3)
+        .background(Palette.row, in: .capsule)
         .sensoryFeedback(.selection, trigger: scope)
+        .accessibilityRepresentation {
+            Picker("List", selection: $scope) {
+                ForEach(TaskScope.allCases) { option in
+                    Text(accessibilityLabel(option)).tag(option)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
     }
 
-    private func label(_ scope: TaskScope) -> String {
-        guard scope == .steward, model.needsYouCount > 0 else { return scope.title }
-        return "\(scope.title) · \(model.needsYouCount)"
+    private func segment(_ option: TaskScope) -> some View {
+        let chosen = option == scope
+        return HStack(spacing: 8) {
+            avatar(option)
+            Text(option.title)
+                .font(.subheadline.weight(chosen ? .semibold : .medium))
+                .foregroundStyle(chosen ? Palette.ink : Palette.muted)
+                .lineLimit(1)
+            if option == .steward, model.needsYouCount > 0 {
+                Text("\(model.needsYouCount)")
+                    .font(.caption.weight(.bold).monospacedDigit())
+                    .foregroundStyle(Palette.onOrange)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(Palette.orange, in: .capsule)
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .background {
+            if chosen {
+                Capsule()
+                    .fill(Self.thumbFill)
+                    .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
+                    .matchedGeometryEffect(id: "thumb", in: thumb)
+            }
+        }
+        .contentShape(.capsule)
+    }
+
+    @ViewBuilder
+    private func avatar(_ option: TaskScope) -> some View {
+        Group {
+            switch option {
+            case .mine: OwnerAvatar(size: face)
+            case .steward: StewardAvatar(size: face, blinks: false)
+            }
+        }
+        // Quieter when it isn't the list showing.
+        .opacity(option == scope ? 1 : 0.7)
+        .accessibilityHidden(true)
+    }
+
+    private func choose(_ option: TaskScope) {
+        guard option != scope else { return }
+        if reduceMotion {
+            scope = option
+        } else {
+            withAnimation(.snappy(duration: 0.28)) { scope = option }
+        }
+    }
+
+    private func accessibilityLabel(_ option: TaskScope) -> String {
+        guard option == .steward, model.needsYouCount > 0 else { return option.title }
+        return "\(option.title), \(model.needsYouCount) need you"
     }
 }
 
@@ -736,7 +806,7 @@ private struct TaskActions: ViewModifier {
 }
 
 /// The last move, with a way back, for a few seconds.
-private struct UndoToast: View {
+struct UndoToast: View {
     @Environment(TasksModel.self) private var model
 
     var body: some View {
