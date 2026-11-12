@@ -67,11 +67,14 @@ public struct CaseFile: Codable, Identifiable, Sendable, Equatable {
         public var name: String
         public var domain: String
         public var email: String
+        /// Where the company is, as the harness scenarios name it ("DE", "UK").
+        public var country: String?
 
-        public init(name: String, domain: String, email: String) {
+        public init(name: String, domain: String, email: String, country: String? = nil) {
             self.name = name
             self.domain = domain
             self.email = email
+            self.country = country
         }
     }
 

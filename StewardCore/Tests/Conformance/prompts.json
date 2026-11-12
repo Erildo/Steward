@@ -1,0 +1,30 @@
+[
+  {
+    "name": "with_playbook",
+    "today": "2026-11-10",
+    "owner": {
+      "name": "Lena Hoffmann",
+      "email": "case-7f3a@steward.example",
+      "account_ref": "Mitgliedsnummer 448120",
+      "facts": "Joined 1 March 2024\n  on a 24-month contract.",
+      "goal": "Cancel at the earliest date with written confirmation.",
+      "will_not": ["accept a discount", "pay a fee"]
+    },
+    "company": {"name": "FitWerk Studios GmbH", "domain": "fitwerk.example", "email": "kundenservice@fitwerk.example", "country": "DE"},
+    "playbook": "1. Cite § 309 Nr. 9 BGB.\n2. Braces like {name} stay as written."
+  },
+  {
+    "name": "no_playbook",
+    "today": "2026-12-31",
+    "owner": {
+      "name": "Ana Souza",
+      "email": "case-91bc@steward.example",
+      "account_ref": "Contrato 77-1203",
+      "facts": "Moved house in October.",
+      "goal": "Stop the unwanted add-on and get the charge back.",
+      "will_not": []
+    },
+    "company": {"name": "Vivo Rede", "domain": "vivo-rede.example", "email": "atendimento@vivo-rede.example", "country": "BR"},
+    "playbook": null
+  }
+]

@@ -9,7 +9,7 @@ let package = Package(
     platforms: [.iOS(.v26), .macOS(.v26)],
     products: [.library(name: "StewardCore", targets: ["StewardCore"])],
     targets: [
-        .target(name: "StewardCore"),
+        .target(name: "StewardCore", resources: [.copy("Spec")]),
         .testTarget(name: "StewardCoreTests", dependencies: ["StewardCore"]),
     ]
 )

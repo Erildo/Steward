@@ -12,6 +12,8 @@ from typing import Any, Literal
 from inspect_ai.util import StoreModel, store_as
 from pydantic import Field
 
+from .spec import day as spec_day
+
 CompanyStatus = Literal["open", "confirmed", "refused_final"]
 
 
@@ -44,8 +46,7 @@ class Case(StoreModel):
         """The calendar date of a simulated day. Cases start on the scenario's
         start_date (default 10 November 2026), so emails carry real dates."""
         start = date.fromisoformat(str(self.scenario.get("start_date", "2026-11-10")))
-        d = start + timedelta(days=self.day if day is None else day)
-        return f"{d:%A} {d.day} {d:%B %Y}"
+        return spec_day(start + timedelta(days=self.day if day is None else day))
 
     # Lists are reassigned, not mutated, so the store sees every change.
     def log(self, kind: str, detail: str) -> None:

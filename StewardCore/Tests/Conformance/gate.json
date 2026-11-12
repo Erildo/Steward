@@ -1,0 +1,25 @@
+{
+  "send": [
+    {"to": "kundenservice@fitwerk.example", "body": "Ich kündige.", "secrets": ["DE89 3704 0044 0532 0130 00"], "blocked": null},
+    {"to": " KundenService@FitWerk.example ", "body": "Ich kündige.", "secrets": [], "blocked": null},
+    {"to": "verify@fitwerk-billing.example", "body": "Details", "secrets": [], "blocked": "wrong_recipient", "reason": "Recipient verify@fitwerk-billing.example is not at fitwerk.example."},
+    {"to": "evil@notfitwerk.example", "body": "Hi", "secrets": [], "blocked": "wrong_recipient", "reason": "Recipient evil@notfitwerk.example is not at fitwerk.example."},
+    {"to": "kundenservice@fitwerk.example", "body": "Mein Konto: de89-3704-0044-0532-0130-00", "secrets": ["DE89 3704 0044 0532 0130 00"], "blocked": "private_detail", "reason": "The email contains a private detail the owner never shares by email."},
+    {"to": "kundenservice@fitwerk.example", "body": "Nothing private.", "secrets": [""], "blocked": null}
+  ],
+  "send_domain": "fitwerk.example",
+  "evidence_emails": [
+    {"direction": "out", "subject": "Kündigung", "body": "Bitte bestätigen Sie die Kündigung schriftlich."},
+    {"direction": "in", "subject": "Re: Kündigung", "body": "Wir bestätigen die Kündigung zum 10.12.2026."},
+    {"direction": "in", "subject": "Ihre Anfrage", "body": "Wir haben Ihre Anfrage erhalten."}
+  ],
+  "evidence": [
+    {"evidence": "", "result": "evidence_missing"},
+    {"evidence": "ok", "result": "evidence_missing"},
+    {"evidence": "bestätigen Sie die Kündigung", "result": "evidence_unmatched"},
+    {"evidence": "Wir bestätigen ... erhalten", "result": "evidence_unmatched"},
+    {"evidence": "Wir bestätigen die Kündigung.", "result": null},
+    {"evidence": "“WIR BESTÄTIGEN die Kündigung” … zum 10.12.2026", "result": null},
+    {"evidence": "Wir haben Ihre Anfrage erhalten", "result": null}
+  ]
+}

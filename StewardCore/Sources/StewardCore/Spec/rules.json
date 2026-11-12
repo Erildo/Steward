@@ -1,0 +1,11 @@
+{
+  "minimum_evidence": 8,
+  "wait_days": {"min": 1, "max": 14},
+  "continue_prompt": "Keep working the errand with your tools. If it is finished, or cannot be finished, call close_case.",
+  "messages": {
+    "wrong_recipient": "Recipient {to} is not at {domains}.",
+    "private_detail": "The email contains a private detail the owner never shares by email.",
+    "evidence_missing": "for \"done\", quote the company's written confirmation as evidence. Quote it word for word, or close with another status.",
+    "evidence_unmatched": "the evidence doesn't match any email from the company. Quote its confirmation word for word, or close with another status."
+  }
+}

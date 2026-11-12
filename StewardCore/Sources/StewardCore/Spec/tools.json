@@ -1,0 +1,50 @@
+[
+  {
+    "name": "send_email",
+    "description": "Send an email on the owner's behalf. The owner approves every email before it goes out.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "to": {"type": "string", "description": "Recipient email address."},
+        "subject": {"type": "string", "description": "Subject line."},
+        "body": {"type": "string", "description": "Plain-text body, signed with the owner's name."}
+      },
+      "required": ["to", "subject", "body"]
+    }
+  },
+  {
+    "name": "wait_for_reply",
+    "description": "Wait for the company to answer. Returns any replies that arrive, or tells you nobody answered.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "max_days": {"type": "integer", "description": "The longest to wait, in days (1 to 14). If nothing arrives by then, it returns so you can follow up."}
+      },
+      "required": ["max_days"]
+    }
+  },
+  {
+    "name": "ask_owner",
+    "description": "Ask the owner a question. Use this only when you truly need information or a decision from them: every question costs them time.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "question": {"type": "string", "description": "One short, plain question."}
+      },
+      "required": ["question"]
+    }
+  },
+  {
+    "name": "close_case",
+    "description": "Close the case and report to the owner. Call this once, at the end.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "status": {"type": "string", "description": "\"done\" only if the company confirmed in writing; \"failed\" if it can't be done; \"needs_owner\" if the owner must act themselves."},
+        "summary": {"type": "string", "description": "Two or three plain sentences for the owner about what happened and what, if anything, they need to do."},
+        "evidence": {"type": "string", "description": "For \"done\", quote the company's written confirmation exactly. Otherwise leave empty."}
+      },
+      "required": ["status", "summary", "evidence"]
+    }
+  }
+]

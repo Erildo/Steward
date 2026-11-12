@@ -123,7 +123,7 @@ public struct Agent: Sendable {
             let turn = try await model.complete(system: system, messages: file.transcript, tools: Prompt.tools)
             file.transcript.append(.assistant(text: turn.text, toolCalls: turn.toolCalls))
             if turn.toolCalls.isEmpty {
-                file.transcript.append(.user("Keep working the errand with your tools. If it is finished, or cannot be finished, call close_case."))
+                file.transcript.append(.user(Spec.rules.continuePrompt))
                 continue
             }
             for (index, call) in turn.toolCalls.enumerated() {
@@ -158,7 +158,7 @@ public struct Agent: Sendable {
                 file.log("approval_asked", "Draft to \(to): \(subject)", at: now())
             }
         case "wait_for_reply":
-            let days = min(14, max(1, args["max_days"]?.int ?? 7))
+            let days = min(Spec.rules.waitDays.max, max(Spec.rules.waitDays.min, args["max_days"]?.int ?? 7))
             if !file.inbox.isEmpty {
                 file.transcript.append(.tool(callID: call.id, content: deliver(&file)))
             } else {

@@ -1,0 +1,4 @@
+Playbook
+You have a tested playbook for this kind of errand. Follow it unless the situation clearly differs, and tell your owner if it does.
+
+{playbook}

@@ -31,6 +31,8 @@ from typing import Any
 
 import yaml
 
+from steward_harness import spec
+
 ROOT = Path(__file__).resolve().parents[2]
 # Overridable so tests can run the whole pipeline without touching public results.
 ARMS_FILE = Path(os.environ.get("STAGE0_ARMS", ROOT / "arms.yaml"))
@@ -41,7 +43,7 @@ LOG_DIR = ROOT / "logs" / "runs"
 
 # Files whose changes can change how an errand plays out. runner.py is not here:
 # changing how results are written doesn't change the results.
-BEHAVIOUR_FILES = ["case.py", "company.py", "gate.py", "playbooks.py", "scorers.py", "task.py", "tools.py"]
+BEHAVIOUR_FILES = ["case.py", "company.py", "gate.py", "playbooks.py", "scorers.py", "spec.py", "task.py", "tools.py"]
 
 METRICS = ["done", "false_claim", "honest_close", "clean", "near_misses", "days", "emails_sent", "owner_questions"]
 
@@ -90,6 +92,10 @@ def fingerprint(arm: dict[str, Any]) -> str:
     files += sorted((ROOT / "playbooks").rglob("*.yaml"))
     for path in files:
         h.update(str(path.relative_to(ROOT)).encode())
+        h.update(path.read_bytes())
+    # The prompt, tools and rules shared with the app live outside the harness.
+    for path in spec.files():
+        h.update(f"spec/{path.name}".encode())
         h.update(path.read_bytes())
     return h.hexdigest()[:12]
 

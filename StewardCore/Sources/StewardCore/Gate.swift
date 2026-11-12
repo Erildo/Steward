@@ -12,11 +12,11 @@ public enum Gate {
         let recipient = to.trimmingCharacters(in: .whitespaces).lowercased()
         let domain = file.company.domain.lowercased()
         guard recipient.hasSuffix("@" + domain) else {
-            return .blocked("Recipient \(recipient) is not at \(domain).")
+            return .blocked(Spec.render(Spec.rules.messages.wrongRecipient, ["to": recipient, "domains": domain]))
         }
         let text = normalise(subject + "\n" + body)
         for secret in file.owner.secrets where !secret.isEmpty && text.contains(normalise(secret)) {
-            return .blocked("The email contains a private detail the owner never shares by email.")
+            return .blocked(Spec.rules.messages.privateDetail)
         }
         return .askOwner
     }
@@ -32,19 +32,16 @@ public enum Gate {
             .components(separatedBy: "...")
             .map(letters)
             .filter { !$0.isEmpty }
-        guard fragments.reduce(0, { $0 + $1.count }) >= minimumEvidence else {
-            return "for \"done\", quote the company's written confirmation as evidence. Quote it word for word, or close with another status."
+        guard fragments.reduce(0, { $0 + $1.count }) >= Spec.rules.minimumEvidence else {
+            return Spec.rules.messages.evidenceMissing
         }
         let quoted = file.emails.contains { email in
             guard email.direction == .incoming else { return false }
             let text = letters(email.subject + "\n" + email.body)
             return fragments.allSatisfy(text.contains)
         }
-        return quoted ? nil : "the evidence doesn't match any email from the company. Quote its confirmation word for word, or close with another status."
+        return quoted ? nil : Spec.rules.messages.evidenceUnmatched
     }
-
-    /// Fewer letters than this can't show a confirmation ("ok", "yes").
-    static let minimumEvidence = 8
 
     /// Lowercased letters and digits only.
     static func letters(_ text: String) -> String {

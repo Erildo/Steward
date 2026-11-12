@@ -5,11 +5,12 @@ the owner's approval gate (see gate.py) before it runs.
 """
 
 from inspect_ai.model import ChatMessageSystem, ChatMessageUser, get_model
-from inspect_ai.tool import Tool, ToolError, tool
+from inspect_ai.tool import Tool, ToolError, tool, tool_with
 
 from .case import current_case
 from .company import company_receives
 from .gate import check_evidence
+from .spec import rules, tools as spec_tools
 
 
 def _deliver_due(case, until_day: int) -> list[dict]:
@@ -72,7 +73,8 @@ def wait_for_reply() -> Tool:
             max_days: The longest to wait, in days (1 to 14). If nothing arrives by then, it returns so you can follow up.
         """
         case = current_case()
-        max_days = max(1, min(14, int(max_days)))
+        days = rules()["wait_days"]
+        max_days = max(days["min"], min(days["max"], int(max_days)))
         if case.day >= case.horizon_days:
             return f"{case.date_on()}: the time limit for this test is reached. Close the case now."
 
@@ -165,3 +167,19 @@ def close_case() -> Tool:
         return f"Case closed as {status}."
 
     return execute
+
+
+def _from_spec(make, name: str) -> Tool:
+    """The tool as the shared spec describes it to the model, not as its docstring does."""
+    spec = spec_tools()[name]
+    params = {k: v["description"] for k, v in spec["parameters"]["properties"].items()}
+    return tool_with(make(), name=name, description=spec["description"], parameters=params)
+
+
+def agent_tools() -> list[Tool]:
+    """send_email, wait_for_reply and ask_owner, described by the shared spec."""
+    return [_from_spec(send_email, "send_email"), _from_spec(wait_for_reply, "wait_for_reply"), _from_spec(ask_owner, "ask_owner")]
+
+
+def submit_tool() -> Tool:
+    return _from_spec(close_case, "close_case")
