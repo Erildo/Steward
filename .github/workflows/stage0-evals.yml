@@ -1,5 +1,6 @@
 # Re-tests Stage 0 arms whenever something that shapes their behaviour changes
-# (a model in arms.yaml, harness code, scenarios, playbooks, dependencies), then
+# (a model in arms.yaml, harness code, scenarios, playbooks, dependencies, or the
+# agent spec shared with the app), then
 # commits the updated public results to harness/results/.
 #
 # Needs the repository secret OPENROUTER_API_KEY. Without it the job skips.
@@ -14,6 +15,7 @@ on:
       - "harness/scenarios/**"
       - "harness/playbooks/**"
       - "harness/uv.lock"
+      - "StewardCore/Sources/StewardCore/Spec/**"
   workflow_dispatch:
     inputs:
       force:

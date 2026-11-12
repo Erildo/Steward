@@ -3,9 +3,9 @@ name: Harness tests
 
 on:
   push:
-    paths: ["harness/**", "!harness/results/**", ".github/workflows/harness-tests.yml"]
+    paths: ["harness/**", "!harness/results/**", "StewardCore/Sources/StewardCore/Spec/**", "StewardCore/Tests/Conformance/**", ".github/workflows/harness-tests.yml"]
   pull_request:
-    paths: ["harness/**", "!harness/results/**"]
+    paths: ["harness/**", "!harness/results/**", "StewardCore/Sources/StewardCore/Spec/**", "StewardCore/Tests/Conformance/**"]
 
 jobs:
   test:
