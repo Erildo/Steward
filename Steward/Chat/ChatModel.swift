@@ -67,6 +67,31 @@ final class ChatModel {
         self.showsSampleLabel = showsSampleLabel
         self.service = service
         self.runner = runner
+        runner?.observe { [weak self] before, after, origin in
+            guard origin != .chat else { return }
+            self?.caughtUp(before, after)
+        }
+    }
+
+    /// The owner acted on a chat errand from Tasks: show the same outcome
+    /// here, as if they had tapped the card in chat.
+    private func caughtUp(_ before: CaseFile, _ after: CaseFile) {
+        let id = after.id
+        guard errands[id] != nil else { return }
+        let newEvents = after.events.dropFirst(before.events.count)
+        if errands[id]?.approval == .pending {
+            if newEvents.contains(where: { $0.kind == "email_out" }) {
+                errands[id]?.approval = .approved
+            } else if newEvents.contains(where: { $0.kind == "owner_declined" }) {
+                errands[id]?.approval = .declined
+            }
+        }
+        if questionCaseID == id, let answer = newEvents.first(where: { $0.kind == "owner_answer" }) {
+            questionCaseID = nil
+            messages.append(ChatMessage(author: .owner, text: answer.detail))
+        }
+        if case .closed = after.state, errands[id]?.phase == .finished { return }
+        show(after, newEvents: newEvents)
     }
 
     var activeErrand: Errand? { activeErrandID.flatMap { errands[$0] } }
@@ -400,7 +425,7 @@ extension ChatModel {
             return ChatModel(messages: sample() + [long], showsSampleLabel: true, service: service)
         case "agent":
             // A real agent run on a sample case, with simulated mail and company.
-            let model = ChatModel(messages: [], showsSampleLabel: false, service: service, runner: .simulated())
+            let model = ChatModel(messages: [], showsSampleLabel: false, service: service, runner: CaseService.runner)
             model.send("Cancel my gym membership.")
             return model
         case "errand":

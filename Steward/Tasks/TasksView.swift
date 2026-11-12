@@ -15,6 +15,7 @@ struct TasksView: View {
                     if let file = model.file(id) { CaseDetailView(file: file) }
                 }
         }
+        .environment(model)
         .onAppear { model.reload() }
         .onChange(of: scenePhase) {
             if scenePhase == .active { model.reload() }
@@ -87,7 +88,7 @@ struct TaskRow: View {
         HStack(spacing: 14) {
             KindTile(kind: kind)
             VStack(alignment: .leading, spacing: 3) {
-                Text(file.errand)
+                Text(file.title)
                     .font(.body.weight(.semibold))
                     .foregroundStyle(Palette.ink)
                     .lineLimit(2)

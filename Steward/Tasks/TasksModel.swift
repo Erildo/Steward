@@ -11,11 +11,57 @@ final class TasksModel {
     /// True when the tab shows sample errands, so the view can say so.
     let isSample: Bool
 
-    private let store: CaseStore
+    /// Cases Steward is acting on right now, after the owner's tap.
+    private(set) var working: Set<UUID> = []
+    /// The last action that didn't go through, per case, in plain words.
+    private(set) var problems: [UUID: String] = [:]
 
-    init(store: CaseStore, isSample: Bool) {
+    private let store: CaseStore
+    /// Moves cases forward. `nil` while nothing is connected, so the owner's
+    /// buttons are shown but can't act.
+    private let runner: CaseRunner?
+
+    var canAct: Bool { runner != nil }
+
+    init(store: CaseStore, runner: CaseRunner?, isSample: Bool) {
         self.store = store
+        self.runner = runner
         self.isSample = isSample
+        // Chat moves cases too; show its wakes here as they land.
+        runner?.observe { [weak self] _, _, _ in self?.reload() }
+    }
+
+    // MARK: The owner's moves
+
+    func approve(_ id: UUID, editedBody: String? = nil) {
+        guard case .needsApproval(let callID, _) = file(id)?.state else { return }
+        act(id, .approval(callID: callID, approved: true, editedBody: editedBody))
+    }
+
+    func decline(_ id: UUID) {
+        guard case .needsApproval(let callID, _) = file(id)?.state else { return }
+        act(id, .approval(callID: callID, approved: false, reason: "The owner declined this draft."))
+    }
+
+    func answer(_ id: UUID, _ text: String) {
+        let answer = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !answer.isEmpty, case .needsAnswer = file(id)?.state else { return }
+        act(id, .answer(answer))
+    }
+
+    private func act(_ id: UUID, _ wake: Wake) {
+        guard let runner, !working.contains(id) else { return }
+        working.insert(id)
+        problems[id] = nil
+        Task {
+            do {
+                _ = try await runner.wake(id, with: wake, from: .tasks)
+            } catch {
+                problems[id] = "Steward couldn't finish that step, so it paused here. Nothing more goes out without your OK."
+            }
+            working.remove(id)
+            reload()
+        }
     }
 
     func reload() {
@@ -92,6 +138,14 @@ enum TaskStatus: Equatable {
 }
 
 extension CaseFile {
+    /// The errand as the owner would name it. Cases opened from chat (and the
+    /// harness) store only the kind, such as "cancel", so name the company too.
+    var title: String {
+        let errand = self.errand.trimmingCharacters(in: .whitespaces)
+        guard !errand.contains(" ") else { return errand }
+        return "\(errand.prefix(1).uppercased())\(errand.dropFirst()) with \(company.name)"
+    }
+
     /// One line on where the case stands, in the owner's terms.
     var statusLine: String {
         switch state {
@@ -130,22 +184,13 @@ extension Date {
 extension TasksModel {
     /// Launch states, like chat's and feed's: `-uiState tasks` shows sample
     /// errands and `-uiState tasksEmpty` the first run, both in a temporary
-    /// folder. Otherwise the tab reads the owner's real case files.
+    /// folder (see `CaseService`). Otherwise the tab reads the owner's real
+    /// case files.
     static func launch() -> TasksModel {
-        switch UserDefaults.standard.string(forKey: "uiState") {
-        case "tasks":
-            let store = temporaryStore()
-            for file in TasksSample.cases() { try? store.save(file) }
-            return TasksModel(store: store, isSample: true)
-        case "tasksEmpty":
-            return TasksModel(store: temporaryStore(), isSample: true)
-        default:
-            return TasksModel(store: CaseService.store, isSample: false)
+        if UserDefaults.standard.string(forKey: "uiState") == "tasks" {
+            for file in TasksSample.cases() { try? CaseService.store.save(file) }
         }
-    }
-
-    private static func temporaryStore() -> CaseStore {
-        CaseStore(folder: URL.temporaryDirectory.appending(path: "tasks-sample-\(UUID().uuidString)"))
+        return TasksModel(store: CaseService.store, runner: CaseService.runner, isSample: CaseService.isTasksSample)
     }
 }
 

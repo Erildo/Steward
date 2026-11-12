@@ -31,7 +31,7 @@ struct CaseDetailView: View {
         HStack(spacing: 14) {
             KindTile(kind: kind, size: 52)
             VStack(alignment: .leading, spacing: 2) {
-                Text(file.errand)
+                Text(file.title)
                     .font(.title2.weight(.bold))
                     .foregroundStyle(Palette.ink)
                 Text([file.company.name, file.company.country].compactMap { $0 }.joined(separator: " · "))
@@ -53,10 +53,16 @@ struct CaseDetailView: View {
     }
 }
 
-/// The one thing that happens next, and who does it.
+/// The one thing that happens next, and who does it. When it's the owner's
+/// move, they make it here: approve, edit or decline a draft, or answer.
 private struct NextStep: View {
     let file: CaseFile
     let tint: Color
+
+    @Environment(TasksModel.self) private var model
+    @State private var showsEditor = false
+    @State private var answer = ""
+    @FocusState private var answerFocused: Bool
 
     var body: some View {
         let status = TaskStatus(of: file)
@@ -74,10 +80,27 @@ private struct NextStep: View {
                 }
             }
             details
+            if model.working.contains(file.id) {
+                Label { Text("Steward is on it…") } icon: { ProgressView().controlSize(.small) }
+                    .font(.footnote)
+                    .foregroundStyle(Palette.muted)
+            }
+            if let problem = model.problems[file.id] {
+                Label(problem, systemImage: "exclamationmark.triangle")
+                    .font(.footnote)
+                    .foregroundStyle(Palette.ink)
+            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.stewardBubble, in: .rect(cornerRadius: Palette.cardRadius))
+        .sheet(isPresented: $showsEditor) {
+            if case .needsApproval(_, let draft) = file.state {
+                MessageEditor(text: draft.body) { edited in
+                    model.approve(file.id, editedBody: edited == draft.body ? nil : edited)
+                }
+            }
+        }
         .overlay {
             // The orange ring means this needs you, as on chat's approval card.
             if status == .needsYou {
@@ -101,9 +124,9 @@ private struct NextStep: View {
                 .font(.subheadline)
                 .foregroundStyle(Palette.ink)
                 .textSelection(.enabled)
-            hint("Approve, edit or decline it in Chat. Nothing is sent without your yes.")
+            approvalButtons
         case .needsAnswer:
-            hint("Answer in Chat and Steward carries on.")
+            answerField
         case .closed:
             if let closure = file.closure, !closure.evidence.isEmpty {
                 Divider()
@@ -119,6 +142,63 @@ private struct NextStep: View {
             }
         default:
             EmptyView()
+        }
+    }
+
+    private var busy: Bool { model.working.contains(file.id) || !model.canAct }
+
+    private var approvalButtons: some View {
+        VStack(spacing: 8) {
+            Button { model.approve(file.id) } label: {
+                Text("Approve and Send").font(.body.weight(.semibold)).frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Palette.orange)
+            .foregroundStyle(Palette.onOrange)
+            HStack(spacing: 8) {
+                Button { showsEditor = true } label: { Text("Edit and Send").frame(maxWidth: .infinity) }
+                Button { model.decline(file.id) } label: { Text("Decline").frame(maxWidth: .infinity) }
+            }
+            .buttonStyle(.bordered)
+            .tint(Palette.ink)
+            hint(model.canAct
+                 ? (model.isSample ? "Sample: nothing is really sent." : "Nothing is sent without your yes.")
+                 : "Steward isn't connected yet, so this can't be sent.")
+                .frame(maxWidth: .infinity)
+        }
+        .controlSize(.large)
+        .disabled(busy)
+    }
+
+    private var answerField: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("Your answer", text: $answer, axis: .vertical)
+                    .lineLimit(1...5)
+                    .focused($answerFocused)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .background(Palette.ground, in: .rect(cornerRadius: 18))
+                Button {
+                    model.answer(file.id, answer)
+                    answer = ""
+                    answerFocused = false
+                } label: {
+                    Image(systemName: "arrow.up")
+                        .font(.body.weight(.bold))
+                        .foregroundStyle(Palette.onOrange)
+                        .frame(width: 36, height: 36)
+                        .background(Palette.orange, in: .circle)
+                }
+                .frame(minWidth: 44, minHeight: 44)
+                .opacity(answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.35 : 1)
+                .disabled(answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityLabel("Send answer")
+            }
+            .disabled(busy)
+            if !model.canAct {
+                hint("Steward isn't connected yet, so it can't carry on.")
+            }
         }
     }
 

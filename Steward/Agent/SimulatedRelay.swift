@@ -103,3 +103,40 @@ nonisolated private struct OwnerAwareScript: ModelClient {
         return try await script.complete(system: system, messages: messages, tools: tools)
     }
 }
+
+/// The model behind the Tasks sample. It reacts to the owner's last move, for
+/// any sample case: a sent email means wait a week, a no means hand the case
+/// back, and an answer becomes a short email for the owner to approve.
+nonisolated struct TasksSampleModel: ModelClient {
+    func complete(system: String, messages: [ModelMessage], tools: [ToolSpec]) async throws -> AssistantTurn {
+        guard case .tool(_, let content) = messages.last else {
+            return Self.turn("wait_for_reply", ["max_days": .number(7)])
+        }
+        if content.hasPrefix("The owner said no") {
+            return Self.turn("close_case", [
+                "status": .string("needs_owner"),
+                "summary": .string("You said no, so nothing was sent."),
+                "evidence": .string(""),
+            ])
+        }
+        if content.hasPrefix("Sent on") {
+            return Self.turn("wait_for_reply", ["max_days": .number(7)])
+        }
+        return Self.turn("send_email", [
+            "to": .string(Self.companyEmail(in: system) ?? ""),
+            "subject": .string("Further information on my account"),
+            "body": .string("Hello,\n\nAs you asked, here is the information you need: \(content)\n\nPlease confirm you have what you need to resolve this.\n\nThank you"),
+        ])
+    }
+
+    /// The company's address, as the system prompt states it.
+    private static func companyEmail(in system: String) -> String? {
+        let marker = "Only email the company at its own address: "
+        guard let start = system.range(of: marker)?.upperBound else { return nil }
+        return String(system[start...].prefix { !$0.isWhitespace }).trimmingCharacters(in: CharacterSet(charactersIn: "."))
+    }
+
+    private static func turn(_ name: String, _ args: [String: JSONValue]) -> AssistantTurn {
+        AssistantTurn(toolCalls: [ToolCall(id: UUID().uuidString, name: name, arguments: args)])
+    }
+}

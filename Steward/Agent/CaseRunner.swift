@@ -9,6 +9,15 @@ import StewardCore
 final class CaseRunner {
     struct UnknownCase: Error {}
 
+    /// Which screen the owner acted from, so each screen can catch up on
+    /// wakes it didn't start itself.
+    enum Origin { case chat, tasks }
+
+    /// Called after every wake that changed the case, including a failed one
+    /// that kept what already happened: the case before, after, and who woke it.
+    typealias Observer = (_ before: CaseFile, _ after: CaseFile, _ origin: Origin) -> Void
+    private var observers: [Observer] = []
+
     private(set) var cases: [UUID: CaseFile] = [:]
     private let agent: Agent
     private let store: CaseStore
@@ -25,6 +34,10 @@ final class CaseRunner {
         self.mailbox = mailbox
     }
 
+    func observe(_ observer: @escaping Observer) {
+        observers.append(observer)
+    }
+
     func open(_ file: CaseFile) throws {
         cases[file.id] = file
         try store.save(file)
@@ -32,12 +45,18 @@ final class CaseRunner {
 
     /// Wakes the case, one wake at a time: a wake that arrives while another is
     /// running waits for it, then starts from the case as that one saved it.
-    func wake(_ id: UUID, with wake: Wake) async throws -> CaseFile {
-        try await queue.run(id) { @MainActor in try await self.wakeNow(id, with: wake) }
+    func wake(_ id: UUID, with wake: Wake, from origin: Origin = .chat) async throws -> CaseFile {
+        try await queue.run(id) { @MainActor in try await self.wakeNow(id, with: wake, from: origin) }
     }
 
-    private func wakeNow(_ id: UUID, with wake: Wake) async throws -> CaseFile {
-        guard let file = cases[id] else { throw UnknownCase() }
+    private func wakeNow(_ id: UUID, with wake: Wake, from origin: Origin) async throws -> CaseFile {
+        // A case from an earlier launch is read back from the owner's files.
+        let file: CaseFile
+        if let known = cases[id] {
+            file = known
+        } else {
+            do { file = try store.load(id) } catch { throw UnknownCase() }
+        }
         let next: CaseFile
         do {
             next = try await agent.wake(file, with: wake)
@@ -45,11 +64,18 @@ final class CaseRunner {
             // Keep what already happened (a sent email above all), then report.
             cases[id] = failed.file
             try store.save(failed.file)
+            notify(file, failed.file, origin)
             throw failed.underlying
         }
         cases[id] = next
         try store.save(next)
+        notify(file, next, origin)
         return next
+    }
+
+    private func notify(_ before: CaseFile, _ after: CaseFile, _ origin: Origin) {
+        guard before != after else { return }
+        for observer in observers { observer(before, after, origin) }
     }
 
     /// Hands the agent any mail that has arrived for the case. Returns `nil` when
@@ -68,6 +94,13 @@ extension CaseRunner {
     static func simulated() -> CaseRunner {
         let mailbox = SimulatedMailbox(reply: SimulatedErrand.companyReply)
         return CaseRunner(agent: Agent(model: debugModel() ?? SimulatedErrand.model(), mail: mailbox), mailbox: mailbox)
+    }
+
+    /// The Tasks sample (`-uiState tasks`): simulated mail that no company
+    /// answers, and a sample model that reacts to what the owner just did.
+    static func tasksSample(store: CaseStore) -> CaseRunner {
+        let mailbox = SimulatedMailbox(reply: { _ in nil })
+        return CaseRunner(agent: Agent(model: TasksSampleModel(), mail: mailbox), store: store, mailbox: mailbox)
     }
 
     /// A real model for debug runs only. The key comes from the launch

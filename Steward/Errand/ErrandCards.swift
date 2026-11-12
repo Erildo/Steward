@@ -205,7 +205,7 @@ private struct ApprovalCard: View {
     }
 }
 
-private struct MessageEditor: View {
+struct MessageEditor: View {
     @State var text: String
     let save: (String) -> Void
 
