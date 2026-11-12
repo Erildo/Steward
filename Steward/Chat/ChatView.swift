@@ -184,7 +184,7 @@ private struct ConversationRow: View {
     /// The last thing said, or what Steward showed when it only showed.
     private var preview: String {
         guard let last = task.messages.last else { return "" }
-        let words = last.text.isEmpty ? (last.allBlocks.first.map(Self.describe) ?? "") : last.text
+        let words = last.text.isEmpty ? (last.allBlocks.first.map(Self.describe) ?? "") : ReplyText.plain(last.text)
         return last.author == .owner ? "You: \(words)" : words
     }
 
@@ -198,6 +198,7 @@ private struct ConversationRow: View {
         case .compare(let v): v.title
         case .timeline(let v): v.title
         case .proof(let v): v.headline
+        case .checklist(let v): "\(v.title): \(v.doneCount) of \(v.items.count) done"
         }
     }
 
@@ -411,6 +412,12 @@ private struct ThreadView: View {
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: messages.count) { scrollToEnd(proxy) }
+            .task {
+                // Long formatted replies and tickets settle their height after the
+                // first pass; land on the bottom once they have.
+                try? await Task.sleep(for: .milliseconds(80))
+                if let last = messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
+            }
             .onChange(of: busy) { scrollToEnd(proxy) }
             .onChange(of: chat.reviewRequest, initial: true) { old, new in
                 guard new != old || new > 0, chat.errandConversationID == task.id, let target = chat.approvalMessageID else { return }
@@ -509,12 +516,19 @@ private struct MessageRow: View {
     private var shown: [(offset: Int, element: ReplyBlock)] {
         Array(blocks.enumerated()).filter { !$0.element.isPrompt || promptsLive }
     }
+    /// Steward's replies with structure read as an answer, not a bubble.
+    private var isFormatted: Bool { !isOwner && ReplyText.isStructured(message.text) }
     /// The ticket the ring goes round, when this reply has one.
     private var ringedTicket: Int? { hasFocusRing ? blocks.indices.last { !blocks[$0].isPrompt } : nil }
 
     var body: some View {
         VStack(alignment: isOwner ? .trailing : .leading, spacing: 8) {
-            if !message.text.isEmpty {
+            if isFormatted {
+                FormattedReply(text: message.text)
+                    .anchorPreference(key: FocusRingAnchor.self, value: .bounds) {
+                        hasFocusRing && ringedTicket == nil ? RingTarget(anchor: $0, radius: Palette.cardRadius) : nil
+                    }
+            } else if !message.text.isEmpty {
                 HStack {
                     if isOwner { Spacer(minLength: 56) }
                     bubble
@@ -522,7 +536,7 @@ private struct MessageRow: View {
                 }
             }
             ForEach(shown, id: \.offset) { index, block in
-                ReplyBlockView(block: block, context: context, answer: answer)
+                ReplyBlockView(block: block, index: index, context: context, answer: answer)
                     .anchorPreference(key: FocusRingAnchor.self, value: .bounds) {
                         ringedTicket == index ? RingTarget(anchor: $0, radius: Palette.cardRadius) : nil
                     }
@@ -540,7 +554,8 @@ private struct MessageRow: View {
     }
 
     private var bubble: some View {
-        Text(message.text)
+        // Steward's bold, italics and links show as such; the owner's words stay as typed.
+        Text(isOwner ? AttributedString(message.text) : FormattedReply.inline(message.text))
             .font(.body)
             .foregroundStyle(isOwner ? Palette.onOrange : Palette.ink)
             .textSelection(.enabled)
@@ -559,7 +574,78 @@ private struct MessageRow: View {
                         .offset(x: isOwner ? 4 : -4)
                 }
             }
-            .accessibilityLabel("\(isOwner ? "You" : "Steward"): \(message.text)")
+            .accessibilityLabel("\(isOwner ? "You" : "Steward"): \(isOwner ? message.text : ReplyText.plain(message.text))")
+    }
+}
+
+/// A reply with structure, laid out as an answer: full width, no bubble,
+/// headings, lists and quotes, with its text where a bubble's text would be.
+struct FormattedReply: View {
+    let text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(ReplyText.parse(text).enumerated()), id: \.offset) { index, block in
+                view(for: block)
+                    .padding(.top, index > 0 && isHeading(block) ? 8 : 0)
+            }
+        }
+        .foregroundStyle(Palette.ink)
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 13)
+        .padding(.vertical, 10)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Steward: \(ReplyText.plain(text))")
+    }
+
+    @ViewBuilder
+    private func view(for block: ReplyText.Block) -> some View {
+        switch block {
+        case .heading(let level, let text):
+            Text(Self.inline(text))
+                .font(level == 1 ? .title3.weight(.bold) : level == 2 ? .headline : .subheadline.weight(.semibold))
+                .accessibilityAddTraits(.isHeader)
+        case .paragraph(let text):
+            Text(Self.inline(text)).font(.body)
+        case .bullets(let items):
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Circle().fill(Palette.ink).frame(width: 5, height: 5).alignmentGuide(.firstTextBaseline) { $0[.bottom] + 4 }
+                        Text(Self.inline(item)).font(.body)
+                    }
+                }
+            }
+        case .numbered(let items):
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("\(index + 1).")
+                            .font(.body.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(Palette.muted)
+                            .frame(minWidth: 20, alignment: .trailing)
+                        Text(Self.inline(item)).font(.body)
+                    }
+                }
+            }
+        case .quote(let text):
+            Text(Self.inline(text))
+                .font(.subheadline)
+                .italic()
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Palette.row, in: .rect(cornerRadius: 10))
+        }
+    }
+
+    private func isHeading(_ block: ReplyText.Block) -> Bool {
+        if case .heading = block { true } else { false }
+    }
+
+    /// Bold, italics, code and links inside a line; plain text if it doesn't parse.
+    static func inline(_ text: String) -> AttributedString {
+        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
     }
 }
 

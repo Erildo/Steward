@@ -158,7 +158,9 @@ struct ModelTaskAgent: TaskAgent {
     - compare: 2 to 4 options side by side, marking your pick.
     - timeline: a plan in order (days, times, steps).
     - deadline: a date that matters and what happens around it.
+    - checklist: things only the owner can do; they tick them off, and you'll see which are done.
     Never repeat a block's content in your words; say the one line that matters and let the block carry the rest.
+    Short replies are one or two plain sentences. For a longer answer, use light Markdown: ## headings, - bullets, 1. numbered steps, **bold** for the few words that matter. No tables.
     """
 
     private static let tools: [ToolSpec] = [
@@ -190,7 +192,10 @@ struct ModelTaskAgent: TaskAgent {
         for message in task.messages {
             switch message.author {
             case .owner: messages.append(.user(message.text))
-            case .steward: messages.append(.assistant(text: message.text, toolCalls: []))
+            case .steward:
+                // What was shown, in words, so the model knows what the owner saw and ticked.
+                let shown = message.allBlocks.map(\.plainText)
+                messages.append(.assistant(text: ([message.text] + shown).filter { !$0.isEmpty }.joined(separator: "\n"), toolCalls: []))
             }
         }
         if wake == .timer { messages.append(.user("The date you waited for has come. Carry on.")) }

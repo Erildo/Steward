@@ -521,6 +521,37 @@ extension StewardTask {
         mealKit.state = .done(date: day(-8), confirmedByOwner: false)
         mealKit.result = "Fresh Fork cancelled the subscription."
         mealKit.pinned = true
-        return [mealKit]
+
+        var moving = StewardTask(goal: "What do I need to do before I move out of my flat?", createdAt: now.addingTimeInterval(-600))
+        moving.messages = [
+            .init(author: .owner, text: "What do I need to do before I move out of my flat?", date: now.addingTimeInterval(-600)),
+            .init(author: .steward, text: """
+            ## Start with your notice
+            Your notice date sets every other date, so give it **in writing** first. Most tenancies ask for one month; check yours.
+
+            ## In the last two weeks
+            - Book the van early: weekends at month end go first.
+            - Take dated photos of every room before you hand back the keys.
+            - Read the meters on the last day and keep the photos.
+
+            ## After you leave
+            1. Send the landlord your new address for the deposit.
+            2. Close or move the energy and internet accounts.
+            3. Update your address with your bank.
+
+            > Keep the photos until the deposit is back in full.
+            """, date: now.addingTimeInterval(-540), blocks: [
+                .checklist(.init(title: "Your move-out list", items: [
+                    .init(title: "Give notice in writing", done: true),
+                    .init(title: "Book the van"),
+                    .init(title: "Photograph every room"),
+                    .init(title: "Read and photograph the meters"),
+                    .init(title: "Send the landlord your new address"),
+                ])),
+            ]),
+        ]
+        moving.state = .done(date: now.addingTimeInterval(-540), confirmedByOwner: false)
+        moving.result = "Move-out plan and checklist."
+        return [mealKit, moving]
     }
 }

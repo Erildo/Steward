@@ -39,6 +39,8 @@ extension ReplyBlock {
 /// One block, drawn natively.
 struct ReplyBlockView: View {
     let block: ReplyBlock
+    /// Where the block sits in its message, for blocks the owner changes.
+    let index: Int
     let context: BlockContext
     /// Sends the owner's words, as if typed.
     let answer: (String) -> Void
@@ -53,6 +55,7 @@ struct ReplyBlockView: View {
         case .compare(let v): CompareTicket(compare: v)
         case .timeline(let v): TimelineTicket(timeline: v)
         case .proof(let v): ProofTicket(proof: v)
+        case .checklist(let v): ChecklistTicket(checklist: v, index: index, context: context)
         }
     }
 }
@@ -590,6 +593,82 @@ private struct TimelineTicket: View {
                         .accessibilityElement(children: .combine)
                     }
                 }
+            }
+        }
+    }
+}
+
+/// What's left for the owner. Ticking is the owner's own move, so the tick
+/// wears the owner's orange; it's saved in the thread, and Steward reads it
+/// next time it picks the conversation up.
+private struct ChecklistTicket: View {
+    let checklist: ReplyBlock.Checklist
+    let index: Int
+    let context: BlockContext
+
+    @Environment(TasksModel.self) private var tasks
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var allDone: Bool { checklist.doneCount == checklist.items.count }
+
+    var body: some View {
+        Ticket(kind: "Checklist", status: allDone ? "All done" : "\(checklist.doneCount) of \(checklist.items.count) done") {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(checklist.title)
+                    .font(.headline)
+                    .foregroundStyle(Palette.ink)
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Palette.ticketEdge)
+                        Capsule()
+                            .fill(Palette.ink)
+                            .frame(width: proxy.size.width * Double(checklist.doneCount) / Double(max(checklist.items.count, 1)))
+                    }
+                }
+                .frame(height: 4)
+                .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(checklist.items.enumerated()), id: \.offset) { item, entry in
+                        row(entry, at: item)
+                    }
+                }
+            }
+        }
+        .sensoryFeedback(.success, trigger: allDone) { _, now in now }
+    }
+
+    private func row(_ entry: ReplyBlock.Checklist.Item, at item: Int) -> some View {
+        Button { toggle(item) } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Image(systemName: entry.done ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(entry.done ? Palette.orange : Palette.muted.opacity(0.7))
+                    .contentTransition(.symbolEffect(.replace))
+                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 6 }
+                Text(entry.title)
+                    .font(.subheadline)
+                    .strikethrough(entry.done, color: Palette.muted)
+                    .foregroundStyle(entry.done ? Palette.muted : Palette.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .frame(minHeight: 44)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .sensoryFeedback(.selection, trigger: entry.done)
+        .accessibilityLabel(entry.title)
+        .accessibilityValue(entry.done ? "Done" : "Not done")
+        .accessibilityHint(entry.done ? "Marks it not done" : "Marks it done")
+        .accessibilityAddTraits(entry.done ? .isSelected : [])
+    }
+
+    private func toggle(_ item: Int) {
+        withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) {
+            tasks.editBlock(context.conversationID, context.messageID, at: index) { block in
+                guard case .checklist(var list) = block, list.items.indices.contains(item) else { return }
+                list.items[item].done.toggle()
+                block = .checklist(list)
             }
         }
     }

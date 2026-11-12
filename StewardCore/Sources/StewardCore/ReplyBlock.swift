@@ -26,6 +26,8 @@ public enum ReplyBlock: Codable, Sendable, Equatable {
     case timeline(Timeline)
     /// The outcome of an errand, with the company's own words.
     case proof(Proof)
+    /// What's left for the owner, ticked off in place.
+    case checklist(Checklist)
 
     // MARK: Payloads
 
@@ -162,10 +164,35 @@ public enum ReplyBlock: Codable, Sendable, Equatable {
         }
     }
 
+    public struct Checklist: Codable, Sendable, Equatable {
+        public struct Item: Codable, Sendable, Equatable {
+            public var title: String
+            public var done: Bool
+            public init(title: String, done: Bool = false) {
+                self.title = title
+                self.done = done
+            }
+            private enum CodingKeys: String, CodingKey { case title, done }
+            /// `done` is optional on the wire: a model sends only titles.
+            public init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                title = try container.decode(String.self, forKey: .title)
+                done = try container.decodeIfPresent(Bool.self, forKey: .done) ?? false
+            }
+        }
+        public var title: String
+        public var items: [Item]
+        public init(title: String, items: [Item]) {
+            self.title = title
+            self.items = items
+        }
+        public var doneCount: Int { items.filter(\.done).count }
+    }
+
     // MARK: Coding
 
     public enum Kind: String, Codable, Sendable, CaseIterable {
-        case choices, field, steps, deadline, draft, compare, timeline, proof
+        case choices, field, steps, deadline, draft, compare, timeline, proof, checklist
     }
 
     public var kind: Kind {
@@ -178,6 +205,7 @@ public enum ReplyBlock: Codable, Sendable, Equatable {
         case .compare: .compare
         case .timeline: .timeline
         case .proof: .proof
+        case .checklist: .checklist
         }
     }
 
@@ -194,6 +222,7 @@ public enum ReplyBlock: Codable, Sendable, Equatable {
         case .compare: self = .compare(try Compare(from: decoder))
         case .timeline: self = .timeline(try Timeline(from: decoder))
         case .proof: self = .proof(try Proof(from: decoder))
+        case .checklist: self = .checklist(try Checklist(from: decoder))
         }
     }
 
@@ -209,6 +238,7 @@ public enum ReplyBlock: Codable, Sendable, Equatable {
         case .compare(let v): try v.encode(to: encoder)
         case .timeline(let v): try v.encode(to: encoder)
         case .proof(let v): try v.encode(to: encoder)
+        case .checklist(let v): try v.encode(to: encoder)
         }
     }
 }
@@ -219,7 +249,7 @@ extension ReplyBlock {
     /// What a model may show on its own. Drafts and proof only ever come from
     /// a real case (an email waiting for approval, a company's confirmation),
     /// so a model can't put an Approve button or a "Done" stamp on screen.
-    public static let modelKinds: [Kind] = [.choices, .field, .deadline, .compare, .timeline]
+    public static let modelKinds: [Kind] = [.choices, .field, .deadline, .compare, .timeline, .checklist]
 
     /// Most blocks one reply carries. More than this is a page, not a reply.
     public static let maxPerReply = 3
@@ -235,8 +265,13 @@ extension ReplyBlock {
             guard let data = try? encoder.encode(item),
                   let block = try? decoder.decode(ReplyBlock.self, from: data),
                   modelKinds.contains(block.kind),
-                  let clean = block.sanitized
+                  var clean = block.sanitized
             else { continue }
+            // Only the owner ticks things off.
+            if case .checklist(var list) = clean {
+                for index in list.items.indices { list.items[index].done = false }
+                clean = .checklist(list)
+            }
             blocks.append(clean)
             if blocks.count == maxPerReply { break }
         }
@@ -295,6 +330,10 @@ extension ReplyBlock {
         case .proof(var v):
             v.headline = clean(v.headline, 80)
             return v.headline.isEmpty ? nil : .proof(v)
+        case .checklist(var v):
+            v.title = clean(v.title, 80)
+            v.items = Array(v.items.map { .init(title: clean($0.title, 120), done: $0.done) }.filter { !$0.title.isEmpty }.prefix(12))
+            return v.items.isEmpty ? nil : .checklist(v)
         }
     }
 
@@ -330,7 +369,7 @@ extension ReplyBlock {
             "type": .object([
                 "type": .string("string"),
                 "enum": .array(modelKinds.map { .string($0.rawValue) }),
-                "description": .string("choices: short answers to tap. field: one value to type. deadline: a date that matters. compare: 2 to 4 options side by side. timeline: a plan in order."),
+                "description": .string("choices: short answers to tap. field: one value to type. deadline: a date that matters. compare: 2 to 4 options side by side. timeline: a plan in order. checklist: things the owner must do, which they tick off."),
             ]),
             "options": .object([
                 "type": .string("array"),
@@ -340,11 +379,40 @@ extension ReplyBlock {
             "label": string("field: what you ask for, such as \"Membership email\"."),
             "kind": .object(["type": .string("string"), "enum": .array(["text", "email", "phone", "number", "date"].map { .string($0) })]),
             "placeholder": string("field: an example value."),
-            "title": string("deadline, compare, timeline: the headline."),
+            "title": string("deadline, compare, timeline, checklist: the headline."),
             "progress": .object(["type": .string("number"), "description": .string("deadline: share of the time already passed, 0 to 1.")]),
             "rows": array(of: row, "deadline: up to 4 dated facts."),
-            "items": array(of: item, "timeline: the steps in order."),
+            "items": array(of: item, "timeline: the steps in order. checklist: one item per thing to do, with only a title."),
         ], required: ["type"])
         return array(of: block, "Optional. Interface to show with your words, only when it saves the owner typing or reading. Most replies need none.")
     }()
+}
+
+// MARK: As words
+
+extension ReplyBlock {
+    /// The block in plain words, so a model reading the thread later sees
+    /// what was shown, and what the owner ticked off.
+    public var plainText: String {
+        switch self {
+        case .choices(let v):
+            return "[Offered answers: \(v.options.joined(separator: " / "))]"
+        case .field(let v):
+            return "[Asked for: \(v.label)]"
+        case .steps(let v):
+            return "[\(v.title): " + v.steps.map { "\($0.title) (\($0.state.rawValue))" }.joined(separator: "; ") + "]"
+        case .deadline(let v):
+            return "[\(v.title): " + v.rows.map { "\($0.label) \($0.value)" }.joined(separator: "; ") + "]"
+        case .draft(let v):
+            return "[Draft to \(v.to), \(v.status.rawValue): \(v.subject)]"
+        case .compare(let v):
+            return "[\(v.title): " + v.options.map { "\($0.name)\($0.price.map { " \($0)" } ?? "")\($0.isPick ? " (pick)" : "")" }.joined(separator: "; ") + "]"
+        case .timeline(let v):
+            return "[\(v.title): " + v.items.map { [$0.when, $0.title].compactMap { $0 }.joined(separator: " ") }.joined(separator: "; ") + "]"
+        case .proof(let v):
+            return "[Proof: \(v.headline)]"
+        case .checklist(let v):
+            return "[\(v.title), \(v.doneCount) of \(v.items.count) done: " + v.items.map { "\($0.done ? "[x]" : "[ ]") \($0.title)" }.joined(separator: "; ") + "]"
+        }
+    }
 }
