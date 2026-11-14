@@ -18,5 +18,9 @@ struct StewardApp: App {
         WindowGroup {
             RootTabView()
         }
+        // The daily review, when iOS gives Steward a moment in the background.
+        .backgroundTask(.appRefresh(ReviewRunner.taskID)) {
+            await ReviewRunner.runInBackground()
+        }
     }
 }

@@ -140,6 +140,38 @@ public struct Memory: Codable, Sendable, Equatable {
         items[index].confirmedAt = date
     }
 
+    /// "Not quite": the owner says a guess is off. Steward trusts it one step
+    /// less, and a hunch they doubt is gone. Facts are the owner's own word
+    /// and stay as they are.
+    public mutating func doubt(_ id: UUID) {
+        guard let index = items.firstIndex(where: { $0.id == id }), items[index].kind == .guess else { return }
+        switch items[index].confidence ?? .hunch {
+        case .sure: items[index].confidence = .fairlySure
+        case .fairlySure: items[index].confidence = .hunch
+        case .hunch: items.remove(at: index)
+        }
+    }
+
+    /// The item that says the same thing as `text`, if any.
+    public func item(matching text: String) -> Item? {
+        items.first { Self.same($0.text, text) }
+    }
+
+    /// Whether `text` touches a topic the owner turned off, by the topic's
+    /// marker words (`TaskSpec/topic_words.json`). Whole words only, so
+    /// "ill" doesn't catch "still".
+    public func touchesClosedTopic(_ text: String) -> Bool {
+        let closed = topics.filter { !$0.allowed }.map(\.name)
+        guard !closed.isEmpty else { return false }
+        let words = " " + text.lowercased().map { $0.isLetter || $0.isNumber ? $0 : " " }.reduce(into: "") { $0.append($1) }
+            .split(separator: " ").joined(separator: " ") + " "
+        for name in closed {
+            let markers = TaskSpec.topicWords.first { $0.key.caseInsensitiveCompare(name) == .orderedSame }?.value ?? []
+            if markers.contains(where: { words.contains(" \($0.lowercased()) ") }) { return true }
+        }
+        return false
+    }
+
     public mutating func setTopic(_ name: String, allowed: Bool) {
         guard let index = topics.firstIndex(where: { $0.name == name }) else { return }
         topics[index].allowed = allowed

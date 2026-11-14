@@ -1,0 +1,27 @@
+Now: {now}.
+
+What you know about the owner:
+{memory}
+
+Topics the owner turned off: {closed}.
+
+Their goals:
+{goals}
+
+Open tasks:
+{tasks}
+
+Chats in the last week:
+{chats}
+
+Calendar, next 14 days:
+{calendar}
+
+Reminders, next 14 days:
+{reminders}
+
+Findings the owner asked you to stop noticing:
+{stopped}
+
+Findings the owner said were not quite right:
+{corrected}

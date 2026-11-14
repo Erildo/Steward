@@ -82,7 +82,9 @@ struct InsightsView: View {
             Text("That's this week.")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Palette.ink)
-            Text("Steward looks again on Sunday. Everything it used is in What Steward Knows.")
+            Text(model.isSample
+                 ? "Steward looks again on Sunday. Everything it used is in What Steward Knows."
+                 : "Steward looks again tomorrow. Everything it used is in What Steward Knows.")
                 .font(.footnote)
                 .foregroundStyle(Palette.muted)
             Button("What Steward Knows", systemImage: "person.text.rectangle") { showsKnown = true }
@@ -115,6 +117,7 @@ private struct InsightTicket: View {
     @State private var showsWhy = false
     @State private var drawn = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         Ticket(kind: isLead ? "This week" : insight.kind.label,
@@ -214,7 +217,11 @@ private struct InsightTicket: View {
                 .buttonStyle(.plain)
                 .accessibilityHint("Opens Chat with this written for you to send")
             }
-            HStack(spacing: 8) {
+            // At accessibility sizes the answers stack, so neither wraps mid-word.
+            let row = typeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                : AnyLayout(HStackLayout(spacing: 8))
+            row {
                 ReactionButton(title: "That's me", systemImage: "checkmark",
                                selected: model.reaction(to: insight) == .confirmed) {
                     model.react(.confirmed, to: insight)
@@ -223,7 +230,7 @@ private struct InsightTicket: View {
                                selected: model.reaction(to: insight) == .corrected) {
                     model.react(.corrected, to: insight)
                 }
-                Spacer(minLength: 0)
+                if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
                 Menu {
                     Button("Stop Noticing This", systemImage: "eye.slash", role: .destructive) {
                         withAnimation(.snappy) { model.stopNoticing(insight) }

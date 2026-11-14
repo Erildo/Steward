@@ -68,6 +68,63 @@ public enum TaskSpec {
         Spec.render(contextTemplate, values)
     }
 
+    // MARK: The daily review
+
+    /// The review's system prompt (`review_system.txt`). Stable, like
+    /// `system`: the date and the owner's data go in the context message.
+    public static let reviewSystem: String = text("review_system.txt")
+    /// The review's one message, with `{name}` placeholders (`review_context.txt`).
+    public static let reviewContextTemplate: String = text("review_context.txt")
+    public static let reviewPlaceholders = ["now", "memory", "closed", "goals", "tasks", "chats", "calendar",
+                                            "reminders", "stopped", "corrected"]
+
+    /// Words for empty and unconnected sections of the review's context.
+    public struct ReviewWording: Decodable, Sendable {
+        public var none: String
+        public var notConnected: String
+        public var noTopics: String
+
+        enum CodingKeys: String, CodingKey {
+            case none
+            case notConnected = "not_connected"
+            case noTopics = "no_topics"
+        }
+    }
+
+    public static let reviewWording: ReviewWording = decode("review_wording.json")
+
+    /// The one tool the review answers with. Each insight's optional `chart`
+    /// is the shared block schema narrowed to charts, so it can't drift from
+    /// what Chat accepts.
+    public static let reviewTool: ToolSpec = {
+        let tool: Tool = decode("review_tool.json")
+        return ToolSpec(name: tool.name, description: tool.description, parameters: withInsightChart(tool.parameters))
+    }()
+
+    /// Words that mark a sensitive topic (`topic_words.json`), so a finding
+    /// the model forgot to label is still kept out when the topic is off.
+    public static let topicWords: [String: [String]] = decode("topic_words.json")
+
+    static func withInsightChart(_ parameters: JSONValue) -> JSONValue {
+        guard case .object(let list) = ReplyBlock.modelSchema, case .object(var block)? = list["items"],
+              case .object(var blockProperties)? = block["properties"] else { return parameters }
+        let chartKeys: Set<String> = ["type", "title", "style", "unit", "points", "highlight", "target"]
+        blockProperties = blockProperties.filter { chartKeys.contains($0.key) }
+        blockProperties["type"] = .object(["type": .string("string"), "enum": .array([.string("chart")])])
+        block["properties"] = .object(blockProperties)
+        block["required"] = .array(["type", "style", "unit", "points"].map { .string($0) })
+        block["description"] = .string("Optional. Real numbers from the context, drawn as a chart. Never estimates.")
+        guard case .object(var schema) = parameters, case .object(var properties)? = schema["properties"],
+              case .object(var insights)? = properties["insights"], case .object(var item)? = insights["items"],
+              case .object(var itemProperties)? = item["properties"] else { return parameters }
+        itemProperties["chart"] = .object(block)
+        item["properties"] = .object(itemProperties)
+        insights["items"] = .object(item)
+        properties["insights"] = .object(insights)
+        schema["properties"] = .object(properties)
+        return .object(schema)
+    }
+
     static func withBlocks(_ parameters: JSONValue) -> JSONValue {
         guard case .object(var schema) = parameters, case .object(var properties)? = schema["properties"] else {
             return parameters

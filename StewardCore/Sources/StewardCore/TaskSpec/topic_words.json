@@ -1,0 +1,6 @@
+{
+  "Health and sleep": ["health", "healthy", "sleep", "sleeps", "slept", "sleeping", "insomnia", "tired", "exhausted", "doctor", "illness", "ill", "sick", "symptom", "symptoms", "medication", "medicine", "diagnosis", "therapy", "therapist", "weight", "diet", "pain", "hospital", "headache", "headaches", "migraine"],
+  "Mood": ["mood", "moods", "anxious", "anxiety", "depressed", "depression", "sad", "sadness", "stress", "stressed", "lonely", "loneliness", "happier", "unhappy", "upset", "burnout", "overwhelmed", "feelings", "emotional"],
+  "Relationships": ["relationship", "relationships", "partner", "boyfriend", "girlfriend", "husband", "wife", "dating", "date night", "breakup", "divorce", "ex", "marriage", "romantic"],
+  "Money and spending": ["money", "spending", "spend", "spent", "savings", "saving", "salary", "debt", "budget", "bank", "loan", "rent", "income", "payday"]
+}

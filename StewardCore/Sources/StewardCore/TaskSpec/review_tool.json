@@ -1,0 +1,64 @@
+{
+  "name": "submit_review",
+  "description": "Hand in today's review: what you noticed (insights) and what is coming due (nudges). Call it once.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "insights": {
+        "type": "array",
+        "description": "Zero to six findings, most important first.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "kind": { "type": "string", "enum": ["goal", "change", "about_you"] },
+            "title": { "type": "string", "description": "The finding in a few plain words, to the owner." },
+            "detail": { "type": "string", "description": "One or two sentences of specifics." },
+            "status": { "type": "string", "description": "Goals only: two or three words, such as \"On pace\"." },
+            "status_needs_you": { "type": "boolean", "description": "Goals only: true when it needs the owner." },
+            "lead": { "type": "boolean", "description": "True for the one finding that matters most." },
+            "confidence": { "type": "string", "enum": ["sure", "fairly_sure", "hunch"] },
+            "basis": { "type": "string", "description": "What it rests on, two to four words: \"14 tasks\"." },
+            "evidence": {
+              "type": "array",
+              "description": "One to four items, each pointing at something in the context.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "source": { "type": "string", "enum": ["chat", "task", "calendar", "reminders", "you", "memory"] },
+                  "text": { "type": "string", "description": "Exactly what in the context shows it." }
+                },
+                "required": ["source", "text"]
+              }
+            },
+            "topic": { "type": "string", "description": "The sensitive topic it touches, by name, if any." },
+            "remember": { "type": "string", "description": "The finding as a short third-person note for memory." },
+            "offer": {
+              "type": "object",
+              "description": "Optional next step, as the owner would ask for it.",
+              "properties": {
+                "label": { "type": "string", "description": "Two to five words: \"Plan around late meetings\"." },
+                "request": { "type": "string", "description": "The full request, ready to send." }
+              },
+              "required": ["label", "request"]
+            }
+          },
+          "required": ["kind", "title", "detail", "confidence", "basis", "evidence"]
+        }
+      },
+      "nudges": {
+        "type": "array",
+        "description": "Zero to three heads-ups for things coming due.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "title": { "type": "string", "description": "A few words: \"Passport form due Friday\"." },
+            "body": { "type": "string", "description": "One line on what to do." },
+            "at": { "type": "string", "description": "Local date and time to notify, YYYY-MM-DDTHH:MM." }
+          },
+          "required": ["title", "at"]
+        }
+      }
+    },
+    "required": ["insights", "nudges"]
+  }
+}

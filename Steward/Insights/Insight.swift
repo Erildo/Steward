@@ -32,7 +32,7 @@ struct Insight: Identifiable, Equatable {
     /// Where a finding came from, so the owner can check it.
     struct Evidence: Hashable {
         enum Source: Hashable {
-            case chat, task, feed, you
+            case chat, task, feed, you, calendar, reminders, memory
 
             var systemImage: String {
                 switch self {
@@ -40,6 +40,9 @@ struct Insight: Identifiable, Equatable {
                 case .task: "checkmark.square"
                 case .feed: "newspaper"
                 case .you: "person"
+                case .calendar: "calendar"
+                case .reminders: "list.bullet"
+                case .memory: "person.text.rectangle"
                 }
             }
         }
@@ -69,6 +72,37 @@ struct Insight: Identifiable, Equatable {
     let basis: String
     let evidence: [Evidence]
     var nextStep: NextStep?
+}
+
+extension Insight {
+    /// A finding from the daily review, already checked in StewardCore.
+    init(review: ReviewInsight) {
+        let kind: Kind = switch review.kind {
+        case .goal: .goal
+        case .change: .change
+        case .aboutYou: .aboutYou
+        }
+        let confidence: Confidence = switch review.confidence {
+        case .sure: .sure
+        case .fairlySure: .fairlySure
+        case .hunch: .hunch
+        }
+        let evidence = review.evidence.map { item in
+            let source: Evidence.Source = switch item.source {
+            case .chat: .chat
+            case .task: .task
+            case .calendar: .calendar
+            case .reminders: .reminders
+            case .you: .you
+            case .memory: .memory
+            }
+            return Evidence(source: source, text: item.text)
+        }
+        self.init(id: review.id, kind: kind, title: review.title, detail: review.detail, status: review.status,
+                  statusNeedsYou: review.statusNeedsYou, chart: review.chart, confidence: confidence,
+                  basis: review.basis, evidence: evidence,
+                  nextStep: review.offer.map { NextStep(label: $0.label, request: $0.request) })
+    }
 }
 
 /// Something Steward finished for the owner, and who confirmed it.

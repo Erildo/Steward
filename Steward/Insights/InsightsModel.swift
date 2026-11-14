@@ -2,9 +2,12 @@ import Foundation
 import Observation
 import StewardCore
 
-/// The Insights tab's state: this week's findings, the owner's reactions to
-/// them, what Steward has finished, and what it knows. No engine yet: sample
-/// launches fill it, everything else starts empty.
+/// The Insights tab's state: the latest review's findings, the owner's
+/// reactions to them, what Steward has finished, and what it knows.
+///
+/// Real launches draw the digest from the daily review (`ReviewRunner`,
+/// stored in `Review.json`), and reactions go back to it and to memory.
+/// Sample launches show `InsightsSample` and keep reactions in memory only.
 @MainActor
 @Observable
 final class InsightsModel {
@@ -15,20 +18,27 @@ final class InsightsModel {
         case corrected
     }
 
-    /// The week these findings cover, from its Monday.
-    let weekOf: Date
-    /// What Steward read to reach them, said plainly.
-    let readSummary: String?
-    let lead: Insight?
-    let insights: [Insight]
-    let wins: [Win]
-    let winsSince: Date?
+    /// One week's findings, from the review or a sample.
+    struct Digest {
+        /// The week these findings cover, from its Monday.
+        var weekOf: Date
+        /// What Steward read to reach them, said plainly.
+        var readSummary: String?
+        var lead: Insight?
+        var insights: [Insight]
+        var wins: [Win] = []
+        var winsSince: Date?
+    }
+
     /// What Steward knows, shared with Tasks and the Steward tab.
     let memory: MemoryBook
     let isSample: Bool
+    /// The review behind a real launch; `nil` for samples.
+    @ObservationIgnored let runner: ReviewRunner?
+    private let fixed: Digest
 
-    private(set) var reactions: [UUID: Reaction] = [:]
-    private(set) var hidden: Set<UUID> = []
+    private var sampleReactions: [UUID: Reaction] = [:]
+    private var sampleHidden: Set<UUID> = []
     /// Findings whose charts have drawn in once this session.
     private(set) var drawn: Set<UUID> = []
     /// The finding last stopped, for a few seconds of undo.
@@ -36,44 +46,77 @@ final class InsightsModel {
 
     init(weekOf: Date, readSummary: String?, lead: Insight?, insights: [Insight], wins: [Win],
          winsSince: Date?, memory: MemoryBook = .shared, isSample: Bool) {
-        self.weekOf = weekOf
-        self.readSummary = readSummary
-        self.lead = lead
-        self.insights = insights
-        self.wins = wins
-        self.winsSince = winsSince
+        self.fixed = Digest(weekOf: weekOf, readSummary: readSummary, lead: lead, insights: insights, wins: wins, winsSince: winsSince)
         self.memory = memory
         self.isSample = isSample
+        self.runner = nil
     }
+
+    init(runner: ReviewRunner, memory: MemoryBook = .shared) {
+        self.fixed = Digest(weekOf: Date.now.startOfWeek, insights: [])
+        self.memory = memory
+        self.isSample = false
+        self.runner = runner
+    }
+
+    /// The digest on show: the latest review's, or the sample's.
+    private var digest: Digest {
+        guard let runner, let result = runner.record.result else { return fixed }
+        return Self.digest(from: result)
+    }
+
+    var weekOf: Date { digest.weekOf }
+    var readSummary: String? { digest.readSummary }
+    var lead: Insight? { digest.lead }
+    var insights: [Insight] { digest.insights }
+    var wins: [Win] { digest.wins }
+    var winsSince: Date? { digest.winsSince }
 
     var isEmpty: Bool { lead == nil && insights.isEmpty && wins.isEmpty }
 
     func insights(_ kind: Insight.Kind) -> [Insight] {
-        insights.filter { $0.kind == kind && !hidden.contains($0.id) }
+        insights.filter { $0.kind == kind && !isHidden($0) }
     }
 
-    func isHidden(_ insight: Insight) -> Bool { hidden.contains(insight.id) }
+    func isHidden(_ insight: Insight) -> Bool {
+        runner?.isHidden(insight.id) ?? sampleHidden.contains(insight.id)
+    }
 
-    var hiddenCount: Int { hidden.count }
+    var hiddenCount: Int {
+        guard let runner else { return sampleHidden.count }
+        return runner.record.hidden.count
+    }
 
     func hasDrawn(_ insight: Insight) -> Bool { drawn.contains(insight.id) }
     func markDrawn(_ insight: Insight) { drawn.insert(insight.id) }
 
-    func reaction(to insight: Insight) -> Reaction? { reactions[insight.id] }
+    func reaction(to insight: Insight) -> Reaction? {
+        guard let runner else { return sampleReactions[insight.id] }
+        return switch runner.reaction(to: insight.id) {
+        case .confirmed: .confirmed
+        case .corrected: .corrected
+        case nil: nil
+        }
+    }
 
-    /// Tapping the same answer again takes it back.
+    /// Tapping the same answer again takes it back. On a real launch the
+    /// answer also reaches memory (see `ReviewRunner.react`).
     func react(_ reaction: Reaction, to insight: Insight) {
-        reactions[insight.id] = reactions[insight.id] == reaction ? nil : reaction
+        guard let runner else {
+            sampleReactions[insight.id] = sampleReactions[insight.id] == reaction ? nil : reaction
+            return
+        }
+        runner.react(reaction == .confirmed ? .confirmed : .corrected, to: insight.id)
     }
 
     func stopNoticing(_ insight: Insight) {
-        hidden.insert(insight.id)
+        if let runner { runner.stop(insight.id) } else { sampleHidden.insert(insight.id) }
         lastHidden = insight
     }
 
     func undoStop() {
         guard let insight = lastHidden else { return }
-        hidden.remove(insight.id)
+        if let runner { runner.unstop(insight.id) } else { sampleHidden.remove(insight.id) }
         lastHidden = nil
     }
 
@@ -136,9 +179,31 @@ extension InsightsModel {
     /// Real launches start empty until Steward has something to say.
     static func launch() -> InsightsModel {
         switch UserDefaults.standard.string(forKey: "uiState") {
-        case "insights", "demo": InsightsSample.model()
-        default: empty()
+        case "insights", "demo": return InsightsSample.model()
+        default:
+            guard let runner = ReviewRunner.shared else { return empty() }
+            return InsightsModel(runner: runner)
         }
+    }
+
+    /// A review's findings as the tab draws them. The first one marked as
+    /// the lead opens the week; wins have no engine yet.
+    static func digest(from result: ReviewResult) -> Digest {
+        let all = result.insights.map(Insight.init(review:))
+        let leadID = result.insights.first(where: \.lead)?.id
+        return Digest(weekOf: result.ranAt.startOfWeek, readSummary: readSummary(result),
+                      lead: all.first { $0.id == leadID }, insights: all.filter { $0.id != leadID })
+    }
+
+    /// "Steward read 6 chats, 4 open tasks and 12 calendar events on Saturday."
+    static func readSummary(_ result: ReviewResult) -> String {
+        func count(_ n: Int, _ one: String, _ many: String) -> String { "\(n) \(n == 1 ? one : many)" }
+        var parts = [count(result.read.chats, "chat", "chats"), count(result.read.tasks, "open task", "open tasks")]
+        if let events = result.read.calendar { parts.append(count(events, "calendar event", "calendar events")) }
+        if let reminders = result.read.reminders { parts.append(count(reminders, "reminder", "reminders")) }
+        let list = parts.count > 1 ? parts.dropLast().joined(separator: ", ") + " and " + parts.last! : parts[0]
+        let day = Calendar.current.isDateInToday(result.ranAt) ? "today" : "on " + result.ranAt.formatted(.dateTime.weekday(.wide))
+        return "Steward read \(list) \(day)."
     }
 
     static func empty() -> InsightsModel {

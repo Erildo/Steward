@@ -81,6 +81,9 @@ struct RootTabView: View {
         .onChange(of: scenePhase, initial: true) { _, phase in
             if phase == .background, locks { locked = true; asksOnActive = true }
             if phase == .active, asksOnActive { asksOnActive = false; unlock() }
+            // The daily review: due once a day, 20 hours or more since the last.
+            if phase == .active, let review = ReviewRunner.shared { Task { await review.runIfDue() } }
+            if phase == .background { ReviewRunner.shared?.scheduleBackgroundRefresh() }
             guard phase == .active, let runner = CaseService.runner else { return }
             Task { await runner.refresh() }
         }
