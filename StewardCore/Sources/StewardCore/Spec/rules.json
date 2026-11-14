@@ -1,11 +1,44 @@
 {
   "minimum_evidence": 8,
   "wait_days": {"min": 1, "max": 14},
+  "notes_max_words": 300,
   "continue_prompt": "Keep working the errand with your tools. If it is finished, or cannot be finished, call close_case.",
   "messages": {
     "wrong_recipient": "Recipient {to} is not at {domains}.",
     "private_detail": "The email contains a private detail the owner never shares by email.",
     "evidence_missing": "for \"done\", quote the company's written confirmation as evidence. Quote it word for word, or close with another status.",
-    "evidence_unmatched": "the evidence doesn't match any email from the company. Quote its confirmation word for word, or close with another status."
+    "evidence_unmatched": "the evidence doesn't match any email from the company. Quote its confirmation word for word, or close with another status.",
+    "review_rejected": "a reviewer read the case and doesn't think it is done yet: {reason} Keep working, or close with another status.",
+    "notes_saved": "Notes saved.",
+    "notes_cut": "Notes saved, cut to the first {words} words."
+  },
+  "brief": {
+    "full_emails": 2,
+    "older_email_chars": 600,
+    "timeline_kinds": ["email_out", "email_in", "ask_owner", "owner_declined", "owner_edited", "wait", "gate_block", "close_rejected", "review_rejected", "reopened"],
+    "nothing": "None yet."
+  },
+  "instructions": {
+    "answer": "Asked \"{question}\", they said: {answer}",
+    "declined": "Said no to the email \"{subject}\": {reason}",
+    "reopened": "Said it isn't sorted after all: {reason}"
+  },
+  "new": {
+    "start": "Your owner has just handed you this errand: please handle this {errand} with {company}.",
+    "resume": "Carry on with the errand from where the brief leaves off.",
+    "approved": "Your owner approved your email \"{subject}\". It was sent on {day} to {to}.",
+    "approved_edited": "Your owner edited your email \"{subject}\" before approving it. It was sent on {day} to {to}; the brief shows what was sent.",
+    "declined": "Your owner said no to your email \"{subject}\": {reason}. Nothing was sent.",
+    "answer": "Your owner answered your question \"{question}\": {answer}",
+    "mail": "{day}: {count} new email(s) from the company arrived. They are the latest in the brief.",
+    "timer": "{day}: no reply yet after waiting.",
+    "reopened": "Your owner says it isn't sorted after all, so the case is open again: {reason}",
+    "review": "Steward proposes to close this case as done.\nSummary for the owner: {summary}\nEvidence quoted from the company: {evidence}"
+  },
+  "outcome_check": {
+    "min_days": 3,
+    "max_days": 90,
+    "default_days": 30,
+    "default_question": "Is it sorted? Did {company} do what they confirmed?"
   }
 }

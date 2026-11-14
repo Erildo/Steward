@@ -504,7 +504,8 @@ final class TasksModel {
     }
 
     /// The owner says it's sorted. Their word counts for more than the
-    /// company's, so it's logged even when the company already confirmed.
+    /// company's, so it becomes the case's proof even when the company already
+    /// confirmed, and it answers any outcome check.
     func markDone(_ id: UUID) {
         guard let current = file(id), !current.isConfirmedByOwner else { return }
         change(id, undo: "Marked done") { file in
@@ -512,8 +513,20 @@ final class TasksModel {
                 file.state = .closed
                 file.closure = .init(status: .done, summary: "You marked this done.", evidence: "", date: .now)
             }
+            file.proof = .owner
+            if file.outcomeCheck != nil {
+                file.outcomeCheck?.answer = true
+                file.outcomeCheck?.answeredAt = .now
+            }
             file.events.append(.init(date: .now, kind: "owner_confirmed", detail: "You confirmed it's sorted."))
         }
+    }
+
+    /// The owner's "no" to the outcome check: the company's word wasn't
+    /// enough, so Steward reopens the errand with what the owner said.
+    func reportNotSorted(_ id: UUID, note: String) {
+        guard let file = file(id), file.closure?.status == .done, !file.isConfirmedByOwner else { return }
+        act(id, .outcome(confirmed: false, note: note.trimmingCharacters(in: .whitespacesAndNewlines)))
     }
 
     private func change(_ id: UUID, undo message: String, _ edit: @escaping @MainActor (inout CaseFile) -> Void) {
@@ -660,7 +673,8 @@ enum TaskStatus: Equatable {
             self = .onIt
         case .closed:
             switch file.closure?.status {
-            case .done: self = .done
+            // The outcome check is the owner's move once its day comes.
+            case .done: self = file.outcomeCheckIsDue ? .needsYou : .done
             case .needsOwner: self = .yours
             case .failed, nil: self = .stopped
             }
@@ -697,7 +711,14 @@ extension CaseFile {
         return "\(errand.prefix(1).uppercased())\(errand.dropFirst()) with \(company.name)"
     }
 
-    var isConfirmedByOwner: Bool { events.contains { $0.kind == "owner_confirmed" } }
+    var isConfirmedByOwner: Bool { proof == .owner || events.contains { $0.kind == "owner_confirmed" } }
+
+    /// Closed as done on the company's word, and the day to ask the owner
+    /// whether it really worked has come.
+    var outcomeCheckIsDue: Bool {
+        guard closure?.status == .done, !isConfirmedByOwner, let outcomeCheck else { return false }
+        return outcomeCheck.isDue(at: .now)
+    }
     var wasTakenOver: Bool { events.last { $0.kind.hasPrefix("owner_") || $0.kind == "closed" }?.kind == "owner_took_over" }
     var wasStoppedByOwner: Bool { events.last { $0.kind.hasPrefix("owner_") || $0.kind == "closed" }?.kind == "owner_stopped" }
 
@@ -723,9 +744,9 @@ extension CaseFile {
             guard let closure else { return "Closed" }
             switch closure.status {
             case .done:
-                return isConfirmedByOwner
-                    ? "Confirmed by you · \(closure.date.taskDay)"
-                    : "Confirmed by \(company.name) · \(closure.date.taskDay)"
+                if isConfirmedByOwner { return "Confirmed by you · \(closure.date.taskDay)" }
+                if outcomeCheckIsDue, let outcomeCheck { return "Steward asks: \(outcomeCheck.question)" }
+                return "Confirmed by \(company.name) · \(closure.date.taskDay)"
             case .needsOwner:
                 return wasTakenOver ? "You took this over · \(closure.date.taskDay)" : "Over to you: \(closure.summary)"
             case .failed:
@@ -823,6 +844,10 @@ enum TasksSample {
             .init(date: day(-0.3), kind: "ask_owner", detail: "Do you have a photo of the meter from 1 October?"),
         ]
         energy.state = .needsAnswer(callID: "sample-2", question: "Do you have a photo of the meter from 1 October?")
+        energy.standingInstructions = [
+            .init(date: day(-2), text: "Said no to the email \"Payment plan request\": I'm not paying in instalments for a bill that's wrong."),
+        ]
+        energy.notes = "The bill is estimated at 18,400 kWh; the owner's own reading on 1 Oct was 16,212 kWh. Next: send the photo and ask them to suspend the payment demand until a corrected bill is issued."
 
         var headphones = make("Refund for faulty headphones", "SoundHouse", "soundhouse.example", "UK", playbook: "refund/gb-retail", created: day(-5))
         headphones.events = [
@@ -852,6 +877,9 @@ enum TasksSample {
         mealkit.state = .closed
         mealkit.closure = .init(status: .done, summary: "Fresh Fork cancelled the subscription. No more boxes or charges.",
                                 evidence: "We can confirm your subscription has been cancelled and no further payments will be taken.", date: day(-9))
+        mealkit.proof = .company
+        // The day to check has come: did the charges really stop?
+        mealkit.outcomeCheck = .init(due: day(-0.5), question: "Has Fresh Fork stopped charging your card?")
 
         var phone = make("Cancel phone contract", "Telesul", "telesul.example", "BR", playbook: nil, created: day(-20))
         phone.events = [

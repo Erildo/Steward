@@ -1,0 +1,21 @@
+Case brief for {today}. This is everything you remember from earlier steps of this case.
+
+Errand: {errand} with {company} ({company_email})
+Your owner's goal: {goal}
+
+Your owner's standing instructions (follow them):
+{instructions}
+
+What has happened so far, oldest first:
+{timeline}
+
+Emails in this case, oldest first:
+{emails}
+
+Your notes (your owner can read them):
+{notes}
+
+What's new:
+{new}
+
+Carry on from here. Before you send an email, wait, or ask your owner, save anything you will need later with the note tool: next time, this brief is all you will see.

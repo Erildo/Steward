@@ -7,10 +7,11 @@ the owner's approval gate (see gate.py) before it runs.
 from inspect_ai.model import ChatMessageSystem, ChatMessageUser, get_model
 from inspect_ai.tool import Tool, ToolError, tool, tool_with
 
+from .brief import cap_notes, case_brief, review_proposal, review_system, review_verdict
 from .case import current_case
 from .company import company_receives
 from .gate import check_evidence
-from .spec import rules, tools as spec_tools
+from .spec import render, rules, tool_names, tools as spec_tools
 
 
 def _deliver_due(case, until_day: int) -> list[dict]:
@@ -83,7 +84,7 @@ def wait_for_reply() -> Tool:
         case.day = min(upcoming) if upcoming else limit
         arrived = _deliver_due(case, case.day)
         if not arrived:
-            case.log("wait", f"No reply by day {case.day}.")
+            case.log("wait", f"No reply by {case.date_on()}.")
             return f"{case.date_on()}: no reply yet after waiting."
         parts = [f"{case.date_on()}: {len(arrived)} new email(s)."]
         for r in arrived:
@@ -142,27 +143,76 @@ def ask_owner() -> Tool:
         )
         answer = output.completion.strip()
         case.log("owner_answer", answer)
+        case.instruct(render(rules()["instructions"]["answer"], question=question, answer=answer))
         return answer
 
     return execute
 
 
 @tool
+def note() -> Tool:
+    async def execute(text: str) -> str:
+        """Rewrite your working notes for this case.
+
+        Args:
+            text: Your full notes, replacing the old ones.
+        """
+        case = current_case()
+        notes, cut = cap_notes(text)
+        case.notes = notes
+        messages = rules()["messages"]
+        return render(messages["notes_cut"], words=str(rules()["notes_max_words"])) if cut else messages["notes_saved"]
+
+    return execute
+
+
+async def _review(case, summary: str, evidence: str) -> str | None:
+    """The reviewer reads the brief the agent would see, with the proposed
+    close as what's new. Returns why it rejects, or None."""
+    owner = case.scenario["owner"]
+    model = get_model(role="reviewer", required=True)
+    output = await model.generate(
+        [
+            ChatMessageSystem(content=review_system(owner["name"], owner["goal"])),
+            ChatMessageUser(content=case_brief(case, review_proposal(summary, evidence))),
+        ]
+    )
+    case.reviews = case.reviews + 1
+    return review_verdict(output.completion)
+
+
+@tool
 def close_case() -> Tool:
-    async def execute(status: str, summary: str, evidence: str) -> str:
+    async def execute(status: str, summary: str, evidence: str, check_after_days: int = 0, check_question: str = "") -> str:
         """Close the case and report to the owner. Call this once, at the end.
 
         Args:
             status: "done" only if the company confirmed in writing; "failed" if it can't be done; "needs_owner" if the owner must act themselves.
             summary: Two or three plain sentences for the owner about what happened and what, if anything, they need to do.
             evidence: For "done", quote the company's written confirmation exactly. Otherwise leave empty.
+            check_after_days: For "done": in how many days the owner could see for themselves that it worked.
+            check_question: For "done": the yes/no question to ask the owner then.
         """
         case = current_case()
-        if status == "done" and (reason := check_evidence(evidence, case.emails)):
-            case.log("close_rejected", reason)
-            # An error result keeps the agent going: Inspect only ends on a clean submit.
-            raise ToolError(f"Not closed: {reason}")
+        if status == "done":
+            if reason := check_evidence(evidence, case.emails):
+                case.log("close_rejected", reason)
+                # An error result keeps the agent going: Inspect only ends on a clean submit.
+                raise ToolError(f"Not closed: {reason}")
+            # Mechanical checks first; the reviewer adds judgment, not proof.
+            if case.review and (why := await _review(case, summary, evidence)):
+                reason = render(rules()["messages"]["review_rejected"], reason=why)
+                case.review_rejections = case.review_rejections + 1
+                case.log("review_rejected", reason)
+                raise ToolError(f"Not closed: {reason}")
         case.closed = {"status": status, "summary": summary, "evidence": evidence, "day": case.day}
+        if status == "done":
+            oc = rules()["outcome_check"]
+            days = int(check_after_days) if str(check_after_days).lstrip("-").isdigit() else 0
+            days = min(oc["max_days"], max(oc["min_days"], days if days > 0 else oc["default_days"]))
+            question = check_question.strip() or render(oc["default_question"], company=case.scenario["company"]["name"])
+            case.proof = "company"
+            case.outcome_check = {"after_days": days, "question": question}
         case.log("closed", f"{status}: {summary}")
         return f"Case closed as {status}."
 
@@ -176,9 +226,14 @@ def _from_spec(make, name: str) -> Tool:
     return tool_with(make(), name=name, description=spec["description"], parameters=params)
 
 
-def agent_tools() -> list[Tool]:
-    """send_email, wait_for_reply and ask_owner, described by the shared spec."""
-    return [_from_spec(send_email, "send_email"), _from_spec(wait_for_reply, "wait_for_reply"), _from_spec(ask_owner, "ask_owner")]
+_MAKERS = {"send_email": send_email, "wait_for_reply": wait_for_reply, "ask_owner": ask_owner, "note": note}
+
+
+def agent_tools(context: str = "transcript") -> list[Tool]:
+    """The tools the agent may call in a context, apart from close_case, described
+    by the shared spec: send_email, wait_for_reply and ask_owner, plus note in
+    brief mode."""
+    return [_from_spec(_MAKERS[name], name) for name in tool_names(context) if name != "close_case"]
 
 
 def submit_tool() -> Tool:

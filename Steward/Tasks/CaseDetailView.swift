@@ -12,9 +12,27 @@ struct CaseDetailView: View {
                 header(kind)
                 NextStep(file: file, tint: kind.deep)
                 block("You asked for") {
-                    Text(file.owner.goal)
-                        .font(.body)
-                        .foregroundStyle(Palette.ink)
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(file.owner.goal)
+                            .font(.body)
+                            .foregroundStyle(Palette.ink)
+                        if !file.standingInstructions.isEmpty {
+                            InstructionList(instructions: file.standingInstructions)
+                        }
+                    }
+                }
+                if !file.notes.isEmpty {
+                    block("Steward's notes") {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(file.notes)
+                                .font(.subheadline)
+                                .foregroundStyle(Palette.ink)
+                                .textSelection(.enabled)
+                            Text("Steward keeps these for itself as it works. Nothing in them is hidden from you.")
+                                .font(.caption)
+                                .foregroundStyle(Palette.muted)
+                        }
+                    }
                 }
                 if !file.events.isEmpty {
                     block("What Steward did") { ActivityList(events: file.events) }
@@ -62,6 +80,8 @@ private struct NextStep: View {
 
     @Environment(TasksModel.self) private var model
     @State private var showsEditor = false
+    @State private var showsNotSorted = false
+    @State private var notSortedNote = ""
     @State private var answer = ""
     @FocusState private var answerFocused: Bool
 
@@ -95,6 +115,16 @@ private struct NextStep: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.stewardBubble, in: .rect(cornerRadius: Palette.cardRadius))
+        .alert("What's still wrong?", isPresented: $showsNotSorted) {
+            TextField("For example, they charged me again", text: $notSortedNote)
+            Button("Reopen") {
+                model.reportNotSorted(file.id, note: notSortedNote)
+                notSortedNote = ""
+            }
+            Button("Cancel", role: .cancel) { notSortedNote = "" }
+        } message: {
+            Text("Steward reopens the errand and takes it up with \(file.company.name) again.")
+        }
         .sheet(isPresented: $showsEditor) {
             if case .needsApproval(_, let draft) = file.state {
                 MessageEditor(text: draft.body) { edited in
@@ -141,12 +171,48 @@ private struct NextStep: View {
                         .textSelection(.enabled)
                 }
             }
+            if file.closure?.status == .done {
+                outcome
+            }
         default:
             EmptyView()
         }
     }
 
     private var busy: Bool { model.working.contains(file.id) || !model.canAct }
+
+    /// The second level of proof: the owner's own word that it worked.
+    @ViewBuilder
+    private var outcome: some View {
+        if file.isConfirmedByOwner {
+            Label("You confirmed it worked", systemImage: "checkmark.seal.fill")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Palette.ink)
+        } else if let check = file.outcomeCheck {
+            Divider()
+            if check.isDue(at: .now) {
+                // The question itself is the status line above.
+                VStack(alignment: .leading, spacing: 10) {
+                    Button { model.markDone(file.id) } label: {
+                        Text("Yes, It's Sorted").font(.body.weight(.semibold)).frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Palette.orange)
+                    .foregroundStyle(Palette.onOrange)
+                    Button { showsNotSorted = true } label: {
+                        Text("No, It Isn't").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Palette.ink)
+                    .disabled(busy)
+                    hint("Your answer counts for more than \(file.company.name)'s email. A no puts Steward back on it.")
+                }
+                .controlSize(.large)
+            } else {
+                hint("On \(check.due.formatted(.dateTime.day().month(.wide))), Steward will ask you: \(check.question)")
+            }
+        }
+    }
 
     private var approvalButtons: some View {
         VStack(spacing: 8) {
@@ -217,6 +283,37 @@ private struct NextStep: View {
     }
 }
 
+/// What the owner has told Steward along the way. Steward follows these, and
+/// they stay beside the goal so a steer is never lost.
+private struct InstructionList: View {
+    let instructions: [CaseFile.Instruction]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("What you've told Steward")
+                .font(.footnote)
+                .foregroundStyle(Palette.muted)
+            ForEach(Array(instructions.enumerated()), id: \.offset) { _, instruction in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "text.bubble")
+                        .font(.footnote)
+                        .foregroundStyle(Palette.muted)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(instruction.text)
+                            .font(.subheadline)
+                            .foregroundStyle(Palette.ink)
+                        Text(instruction.date.taskDay)
+                            .font(.caption)
+                            .foregroundStyle(Palette.muted)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+}
+
 /// The case's activity log, oldest first, in plain language.
 private struct ActivityList: View {
     let events: [CaseFile.Event]
@@ -279,7 +376,9 @@ private struct ActivityList: View {
         case "waiting", "wait": "clock"
         case "gate_block": "shield"
         case "closed": "checkmark.seal"
-        case "close_rejected": "arrow.uturn.backward"
+        case "close_rejected", "review_rejected": "arrow.uturn.backward"
+        case "reopened": "arrow.counterclockwise"
+        case "send_failed": "exclamationmark.triangle"
         case "wake_failed": "exclamationmark.triangle"
         default: "circle"
         }
@@ -305,7 +404,7 @@ private struct CaseMenu: View {
             if status == .done, !file.isConfirmedByOwner {
                 Button("Confirm It's Sorted", systemImage: "checkmark.seal") { model.markDone(file.id) }
             }
-            if [.needsYou, .onIt].contains(status) {
+            if [.needsYou, .onIt].contains(status), file.state != .closed {
                 Button("Take Over", systemImage: "hand.raised") { model.takeOver(file.id) }
                 Divider()
                 Button("Stop Errand", systemImage: "stop.circle", role: .destructive) { model.stop(file.id) }

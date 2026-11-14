@@ -22,7 +22,7 @@ def _text(name: str) -> str:
 
 @cache
 def templates() -> dict[str, str]:
-    return {name: _text(f"{name}.txt") for name in ("system", "playbook", "no_playbook")}
+    return {name: _text(f"{name}.txt") for name in ("system", "playbook", "no_playbook", "brief", "review")}
 
 
 @cache
@@ -32,8 +32,14 @@ def rules() -> dict[str, Any]:
 
 @cache
 def tools() -> dict[str, dict[str, Any]]:
-    """Tool specs by name: {name, description, parameters (JSON Schema)}."""
+    """Tool specs by name: {name, context?, description, parameters (JSON Schema)}."""
     return {t["name"]: t for t in json.loads((SPEC_DIR / "tools.json").read_text(encoding="utf-8"))}
+
+
+def tool_names(context: str) -> list[str]:
+    """The tools offered in a context, in spec order. Transcript replay gets the
+    core tools; brief mode adds those marked "context": "brief" (the notes)."""
+    return [name for name, t in tools().items() if t.get("context") in (None, context)]
 
 
 def render(template: str, **values: str) -> str:

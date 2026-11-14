@@ -5,11 +5,24 @@
     "parameters": {
       "type": "object",
       "properties": {
-        "to": {"type": "string", "description": "Recipient email address."},
-        "subject": {"type": "string", "description": "Subject line."},
-        "body": {"type": "string", "description": "Plain-text body, signed with the owner's name."}
+        "to": {
+          "type": "string",
+          "description": "Recipient email address."
+        },
+        "subject": {
+          "type": "string",
+          "description": "Subject line."
+        },
+        "body": {
+          "type": "string",
+          "description": "Plain-text body, signed with the owner's name."
+        }
       },
-      "required": ["to", "subject", "body"]
+      "required": [
+        "to",
+        "subject",
+        "body"
+      ]
     }
   },
   {
@@ -18,9 +31,14 @@
     "parameters": {
       "type": "object",
       "properties": {
-        "max_days": {"type": "integer", "description": "The longest to wait, in days (1 to 14). If nothing arrives by then, it returns so you can follow up."}
+        "max_days": {
+          "type": "integer",
+          "description": "The longest to wait, in days (1 to 14). If nothing arrives by then, it returns so you can follow up."
+        }
       },
-      "required": ["max_days"]
+      "required": [
+        "max_days"
+      ]
     }
   },
   {
@@ -29,9 +47,31 @@
     "parameters": {
       "type": "object",
       "properties": {
-        "question": {"type": "string", "description": "One short, plain question."}
+        "question": {
+          "type": "string",
+          "description": "One short, plain question."
+        }
       },
-      "required": ["question"]
+      "required": [
+        "question"
+      ]
+    }
+  },
+  {
+    "name": "note",
+    "context": "brief",
+    "description": "Rewrite your working notes for this case: what you have tried, what the company said, and what you plan next. They replace your previous notes, are shown to you at every step, and your owner can read them. Keep them short.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "Your full notes, replacing the old ones."
+        }
+      },
+      "required": [
+        "text"
+      ]
     }
   },
   {
@@ -40,11 +80,32 @@
     "parameters": {
       "type": "object",
       "properties": {
-        "status": {"type": "string", "description": "\"done\" only if the company confirmed in writing; \"failed\" if it can't be done; \"needs_owner\" if the owner must act themselves."},
-        "summary": {"type": "string", "description": "Two or three plain sentences for the owner about what happened and what, if anything, they need to do."},
-        "evidence": {"type": "string", "description": "For \"done\", quote the company's written confirmation exactly. Otherwise leave empty."}
+        "status": {
+          "type": "string",
+          "description": "\"done\" only if the company confirmed in writing; \"failed\" if it can't be done; \"needs_owner\" if the owner must act themselves."
+        },
+        "summary": {
+          "type": "string",
+          "description": "Two or three plain sentences for the owner about what happened and what, if anything, they need to do."
+        },
+        "evidence": {
+          "type": "string",
+          "description": "For \"done\", quote the company's written confirmation exactly. Otherwise leave empty."
+        },
+        "check_after_days": {
+          "type": "integer",
+          "description": "For \"done\": in how many days your owner could see for themselves that it worked, such as after the next bill or when the refund should have arrived (3 to 90). Use 0 otherwise."
+        },
+        "check_question": {
+          "type": "string",
+          "description": "For \"done\": the one yes/no question to ask your owner on that day, such as \"Did the charge stop?\". Otherwise leave empty."
+        }
       },
-      "required": ["status", "summary", "evidence"]
+      "required": [
+        "status",
+        "summary",
+        "evidence"
+      ]
     }
   }
 ]

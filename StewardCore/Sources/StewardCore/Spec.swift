@@ -4,7 +4,10 @@ import Foundation
 ///
 /// - `system.txt`, `playbook.txt`, `no_playbook.txt`: prompt templates with
 ///   `{name}` placeholders and no other braces.
-/// - `tools.json`: the tools as the model sees them, as JSON Schema.
+/// - `brief.txt`: the case brief the agent sees at each wake in brief mode.
+/// - `review.txt`: the reviewer's instructions before a "done" is accepted.
+/// - `tools.json`: the tools as the model sees them, as JSON Schema. A tool
+///   with `"context": "brief"` is offered only in brief mode.
 /// - `rules.json`: numbers and wording for the gate and the loop.
 ///
 /// `harness/src/steward_harness/spec.py` loads the same files, and
@@ -20,15 +23,45 @@ enum Spec {
             var privateDetail: String
             var evidenceMissing: String
             var evidenceUnmatched: String
+            var reviewRejected: String
+            var notesSaved: String
+            var notesCut: String
+        }
+        struct BriefRules: Decodable {
+            var fullEmails: Int
+            var olderEmailChars: Int
+            var timelineKinds: [String]
+            var nothing: String
+        }
+        struct Instructions: Decodable {
+            var answer: String
+            var declined: String
+            var reopened: String
+        }
+        /// How each kind of wake is told to the agent in brief mode.
+        struct New: Decodable {
+            var start, resume, approved, approvedEdited, declined, answer, mail, timer, reopened, review: String
+        }
+        struct OutcomeCheck: Decodable {
+            var minDays: Int
+            var maxDays: Int
+            var defaultDays: Int
+            var defaultQuestion: String
         }
         var minimumEvidence: Int
         var waitDays: Days
+        var notesMaxWords: Int
         var continuePrompt: String
         var messages: Messages
+        var brief: BriefRules
+        var instructions: Instructions
+        var new: New
+        var outcomeCheck: OutcomeCheck
     }
 
     private struct Tool: Decodable {
         var name: String
+        var context: String?
         var description: String
         var parameters: JSONValue
     }
@@ -36,9 +69,17 @@ enum Spec {
     static let system = text("system.txt")
     static let playbook = text("playbook.txt")
     static let noPlaybook = text("no_playbook.txt")
+    static let brief = text("brief.txt")
+    static let review = text("review.txt")
     static let rules: Rules = decode("rules.json")
-    static let tools: [ToolSpec] = (decode("tools.json") as [Tool]).map {
-        ToolSpec(name: $0.name, description: $0.description, parameters: $0.parameters)
+    private static let allTools: [Tool] = decode("tools.json")
+
+    /// The tools offered in a context: transcript replay gets the core tools,
+    /// brief mode adds the ones marked `"context": "brief"` (the notes).
+    static func tools(for context: AgentContext) -> [ToolSpec] {
+        allTools
+            .filter { $0.context == nil || $0.context == context.rawValue }
+            .map { ToolSpec(name: $0.name, description: $0.description, parameters: $0.parameters) }
     }
 
     /// Fills `{key}` placeholders in one pass, so a value that itself contains

@@ -6,6 +6,9 @@ ConformanceTests read the same files:
   and the system prompt that must result, byte for byte.
 - gate.json: drafts the send rules must pass or block, and evidence the "done"
   rule must accept or reject.
+- briefs.json and expected/brief_*.txt, expected/review_system.txt: the case
+  brief and the reviewer's prompt, how a reviewer's reply is read, and how
+  notes are capped.
 
 After an intended spec change, regenerate the expected prompts with
 `uv run python tests/test_conformance.py --write`, read the diff, and commit it.
@@ -20,12 +23,41 @@ import pytest
 from inspect_ai.tool import ToolDef
 
 from steward_harness import spec
+from steward_harness.brief import cap_notes, render_brief, review_system, review_verdict
 from steward_harness.gate import check_evidence, check_send
 from steward_harness.tools import agent_tools, submit_tool
 
 CASES = Path(__file__).resolve().parents[2] / "StewardCore" / "Tests" / "Conformance"
 PROMPTS = json.loads((CASES / "prompts.json").read_text(encoding="utf-8"))
 GATE = json.loads((CASES / "gate.json").read_text(encoding="utf-8"))
+BRIEFS = json.loads((CASES / "briefs.json").read_text(encoding="utf-8"))
+
+
+def _day(iso: str) -> str:
+    return spec.day(date.fromisoformat(iso))
+
+
+def rendered_brief(case: dict) -> str:
+    return render_brief(
+        today=_day(case["today"]),
+        errand=case["errand"],
+        company=case["company"]["name"],
+        company_email=case["company"]["email"],
+        goal=case["goal"],
+        instructions=[(_day(i["day"]), i["text"]) for i in case["instructions"]],
+        timeline=[(_day(e["day"]), e["kind"], e["detail"]) for e in case["timeline"]],
+        emails=[
+            {"incoming": e["direction"] == "in", "day": _day(e["day"]), "sender": e["from"], "to": e["to"],
+             "subject": e["subject"], "body": e["body"]}
+            for e in case["emails"]
+        ],
+        notes=case["notes"],
+        new=case["new"],
+    )
+
+
+def rendered_review() -> str:
+    return review_system(BRIEFS["review"]["name"], BRIEFS["review"]["goal"])
 
 
 def rendered(case: dict) -> str:
@@ -44,8 +76,33 @@ def test_system_prompt_matches(case):
     assert rendered(case) == expected
 
 
+@pytest.mark.parametrize("case", BRIEFS["briefs"], ids=lambda c: c["name"])
+def test_brief_matches(case):
+    expected = (CASES / "expected" / f"{case['name']}.txt").read_text(encoding="utf-8")
+    assert rendered_brief(case) == expected
+
+
+def test_review_prompt_matches():
+    assert rendered_review() == (CASES / "expected" / "review_system.txt").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("case", BRIEFS["verdicts"], ids=lambda c: c["reply"] or "empty")
+def test_review_verdicts(case):
+    assert review_verdict(case["reply"]) == case["reject"]
+
+
+@pytest.mark.parametrize("case", BRIEFS["notes"], ids=lambda c: c["text"][:20])
+def test_notes_cap(case):
+    assert cap_notes(case["text"]) == (case["saved"], case["cut"])
+
+
+def test_tools_per_context():
+    assert spec.tool_names("transcript") == ["send_email", "wait_for_reply", "ask_owner", "close_case"]
+    assert spec.tool_names("brief") == ["send_email", "wait_for_reply", "ask_owner", "note", "close_case"]
+
+
 def test_tools_match_the_spec():
-    for tool in [*agent_tools(), submit_tool()]:
+    for tool in [*agent_tools("brief"), submit_tool()]:
         info = ToolDef(tool)
         want = spec.tools()[info.name]
         assert info.description == want["description"]
@@ -76,3 +133,8 @@ if __name__ == "__main__" and "--write" in sys.argv:
     for case in PROMPTS:
         (CASES / "expected" / f"{case['name']}.txt").write_text(rendered(case), encoding="utf-8")
         print("wrote", case["name"])
+    for case in BRIEFS["briefs"]:
+        (CASES / "expected" / f"{case['name']}.txt").write_text(rendered_brief(case), encoding="utf-8")
+        print("wrote", case["name"])
+    (CASES / "expected" / "review_system.txt").write_text(rendered_review(), encoding="utf-8")
+    print("wrote review_system")

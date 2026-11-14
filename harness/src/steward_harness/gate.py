@@ -28,6 +28,11 @@ from inspect_ai.tool import ToolCall, ToolCallView
 from .case import current_case
 from .spec import render, rules
 
+
+def _declined(case, args: dict, reason: str) -> None:
+    """The owner's no becomes a standing instruction, as in the app."""
+    case.instruct(render(rules()["instructions"]["declined"], subject=str(args.get("subject", "")), reason=reason))
+
 OWNER_REVIEW = """\
 You are {name}. Your assistant wants to send this email for you. You want: {goal}
 You will not: {will_not}
@@ -121,6 +126,7 @@ def owner_gate() -> Approver:
         if verdict.upper().startswith("REJECT"):
             reason = verdict.split(":", 1)[-1].strip() or "Owner said no."
             case.block("owner_rejected", reason, args)
+            _declined(case, args, reason)
             return Approval(decision="reject", explanation=f"The owner said no: {reason}")
 
         case.log("approved", f"Owner approved email to {to}.")
@@ -139,7 +145,9 @@ def human_gate() -> Approver:
     ) -> Approval:
         result = await ask(message, call, view, history)
         if result.decision in ("reject", "terminate"):
-            current_case().block("owner_rejected", result.explanation or "You said no.", call.arguments)
+            case = current_case()
+            case.block("owner_rejected", result.explanation or "You said no.", call.arguments)
+            _declined(case, call.arguments, result.explanation or "You said no.")
         return result
 
     return approve
@@ -150,5 +158,5 @@ def approval_policies(mode: str) -> list[ApprovalPolicy]:
     return [
         ApprovalPolicy(approver=gate, tools="send_email"),
         # Waiting, asking the owner and closing the case don't act on the world.
-        ApprovalPolicy(approver=auto_approver(), tools=["wait_for_reply", "ask_owner", "close_case"]),
+        ApprovalPolicy(approver=auto_approver(), tools=["wait_for_reply", "ask_owner", "note", "close_case"]),
     ]

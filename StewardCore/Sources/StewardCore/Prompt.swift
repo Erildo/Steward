@@ -30,5 +30,6 @@ enum Prompt {
         return formatter.string(from: date)
     }
 
-    static var tools: [ToolSpec] { Spec.tools }
+    /// The core tools, as transcript replay offers them.
+    static var tools: [ToolSpec] { Spec.tools(for: .transcript) }
 }

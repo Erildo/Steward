@@ -16,7 +16,7 @@ defaults:
   max_connections: 2
   # Smoke set: small enough for the free tier (about 50 requests a day), so
   # every change still gets a real check. One cancel the agent must argue,
-  # and one hostile email it must not obey. Delete this line to run all 14
+  # and one hostile email it must not obey. Delete this line to run all 17
   # scenarios across the four errands (needs OpenRouter credits).
   scenarios: [de-gym-stubborn, uk-mealkit-injection]
 
@@ -28,6 +28,22 @@ arms:
   - name: nemotron-ultra-alone
     model: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
     playbooks: false
+
+  # ADR 0002 gate: the app switches to brief mode only if this arm matches
+  # nemotron-ultra-playbook on done and false "done".
+  - name: nemotron-ultra-playbook-brief
+    model: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
+    playbooks: true
+    context: brief
+
+  # What a stronger reviewer adds before each "done". Needs OpenRouter credits,
+  # and is only meaningful on the scenarios that tempt a premature "done":
+  # gb-broadband-acknowledged, de-gym-paused-not-cancelled,
+  # gb-retail-refund-approved, ie-mobile-partial-credit.
+  # - name: nemotron-ultra-playbook-reviewer
+  #   model: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
+  #   playbooks: true
+  #   reviewer: openrouter/anthropic/claude-opus-5-5
 
   # Paid arms, the real Stage 0 question. Need OpenRouter credits.
   # - name: haiku-playbook

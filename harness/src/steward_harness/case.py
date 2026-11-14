@@ -47,6 +47,26 @@ class Case(StoreModel):
     closed: dict[str, Any] | None = None
     """How the agent closed the case: {status, summary, evidence, day}."""
 
+    standing_instructions: list[dict[str, Any]] = Field(default_factory=list)
+    """What the owner told the agent along the way: {day, text}. Answers to its
+    questions and reasons for declining a draft, as in the app."""
+
+    notes: str = ""
+    """The agent's working notes, rewritten with the note tool in brief mode."""
+
+    proof: str = "none"
+    """none, company (closed as done on the company's quoted words) or owner.
+    The owner's check comes later, so Stage 0 only ever reaches company."""
+
+    outcome_check: dict[str, Any] | None = None
+    """For a done close: {after_days, question}, the check put to the owner later."""
+
+    review: bool = False
+    """Whether a reviewer model must accept every "done" (the reviewer arm)."""
+
+    reviews: int = 0
+    review_rejections: int = 0
+
     def date_on(self, day: int | None = None) -> str:
         """The calendar date of a simulated day. Cases start on the scenario's
         start_date (default 10 November 2026), so emails carry real dates."""
@@ -59,6 +79,9 @@ class Case(StoreModel):
 
     def add_email(self, email: dict[str, Any]) -> None:
         self.emails = [*self.emails, email]
+
+    def instruct(self, text: str) -> None:
+        self.standing_instructions = [*self.standing_instructions, {"day": self.day, "text": text}]
 
     def block(self, reason_kind: str, detail: str, call: dict[str, Any]) -> None:
         self.gate_blocks = [
