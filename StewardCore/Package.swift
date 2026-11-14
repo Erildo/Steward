@@ -2,8 +2,9 @@
 import PackageDescription
 
 // The agent itself: case, tools, approval gate, model client, agent loop.
-// No UI and no networking beyond the model client, so it runs in the iOS app,
-// in tests on a Mac, and could be ported to other clients.
+// No UI. Its only networking is the model client, the relay client and a
+// read-only IMAP client, so it runs in the iOS app, in tests on a Mac, and
+// could be ported to other clients.
 let package = Package(
     name: "StewardCore",
     platforms: [.iOS(.v26), .macOS(.v26)],

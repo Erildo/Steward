@@ -84,8 +84,10 @@ struct RootTabView: View {
             // The daily review: due once a day, 20 hours or more since the last.
             if phase == .active, let review = ReviewRunner.shared { Task { await review.runIfDue() } }
             if phase == .background { ReviewRunner.shared?.scheduleBackgroundRefresh() }
+            // Opening Steward is a check-in; leaving it books the next one.
+            if phase == .background { CheckIn.schedule() }
             guard phase == .active, let runner = CaseService.runner else { return }
-            Task { await runner.refresh() }
+            if runner.isSimulated { Task { await runner.refresh() } } else { Task { await CheckIn.run(inBackground: false) } }
         }
     }
 }

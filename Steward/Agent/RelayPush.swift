@@ -46,10 +46,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         RelayPush.didRegister(deviceToken: deviceToken)
     }
 
-    /// A silent push: mail is waiting at the relay.
+    /// A silent push: mail is waiting at the relay, so check in early.
+    /// Optional: without pushes, the scheduled check-ins collect it.
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any]) async -> UIBackgroundFetchResult {
-        guard let runner = CaseService.runner else { return .noData }
-        await runner.refresh()
+        guard CaseService.runner != nil else { return .noData }
+        await CheckIn.run(inBackground: application.applicationState != .active)
         return .newData
     }
 
@@ -62,5 +63,29 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     /// The owner tapped a notification.
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         await CaseService.runner?.refresh()
+    }
+}
+
+/// Follow-up times as notifications scheduled on the phone itself. Used with
+/// an owner's own relay, which can't send pushes to Steward's app (APNs only
+/// accepts Steward's key), so wake-ups never depend on a server
+/// (docs/adr/0003). Like the relay's, the notification says nothing about
+/// the errand.
+@MainActor
+enum LocalWake {
+    static var isNeeded: Bool { RelaySettings.choice == .own }
+
+    static func set(_ caseID: UUID, at date: Date?) {
+        let center = UNUserNotificationCenter.current()
+        let id = "wake-\(caseID.uuidString)"
+        center.removePendingNotificationRequests(withIdentifiers: [id])
+        guard let date, date > .now else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Steward"
+        content.body = "An errand has something to check."
+        content.sound = .default
+        let parts = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+        let request = UNNotificationRequest(identifier: id, content: content, trigger: UNCalendarNotificationTrigger(dateMatching: parts, repeats: false))
+        center.add(request)
     }
 }

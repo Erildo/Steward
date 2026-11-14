@@ -23,6 +23,9 @@ struct StewardTabView: View {
     @AppStorage(StewardRules.quietToKey) private var quietTo = StewardRules.defaultTo
     @AppStorage(AppLock.storageKey) private var locks = false
     @State private var lockProblem: String?
+    @State private var usesOwnKey = ModelAccess.hasOwnKey
+    @State private var inboxAddress = InboxSettings.account?.address
+    @AppStorage(RelaySettings.choiceKey) private var relayChoice = RelayChoice.steward
 
     var body: some View {
         NavigationStack {
@@ -34,6 +37,7 @@ struct StewardTabView: View {
                     knownSection
                     rulesSection
                     aiSection
+                    mailSection
                     appSection
                     dataSection
                 }
@@ -281,27 +285,71 @@ struct StewardTabView: View {
                     Image(systemName: "sparkles")
                 }
                 Spacer(minLength: 8)
-                Image(systemName: "checkmark")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(Palette.orangeText)
-                    .accessibilityLabel("In use")
-            }
-            .listRowBackground(Palette.row)
-            Label {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Your Own AI Key")
-                    Text("Coming later, when Steward opens up. Never required.")
-                        .font(.footnote)
+                if !usesOwnKey {
+                    Image(systemName: "checkmark")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Palette.orangeText)
+                        .accessibilityLabel("In use")
                 }
-            } icon: {
-                Image(systemName: "key")
             }
-            .foregroundStyle(Palette.muted)
             .listRowBackground(Palette.row)
-            .accessibilityHint("Not available yet")
+            NavigationLink {
+                OwnAIKeyView()
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Your Own AI Key").foregroundStyle(Palette.ink)
+                        Text(usesOwnKey ? "In use. Goes only to your provider." : "Optional. Never required.")
+                            .font(.footnote)
+                            .foregroundStyle(Palette.muted)
+                    }
+                } icon: {
+                    Image(systemName: "key")
+                }
+            }
+            .listRowBackground(Palette.row)
         } header: {
             header("AI")
+        } footer: {
+            Text("Steward never depends on one company's server. Bring your own key at any time.")
         }
+        .onAppear { usesOwnKey = ModelAccess.hasOwnKey }
+    }
+
+    // MARK: Mail
+
+    /// Where a company's replies wait between check-ins.
+    private var mailSection: some View {
+        Section {
+            NavigationLink {
+                RelayChoiceView()
+            } label: {
+                LabeledContent {
+                    Text(relayChoice.title)
+                } label: {
+                    Label("Relay", systemImage: "arrow.left.arrow.right")
+                        .foregroundStyle(Palette.ink)
+                }
+            }
+            .listRowBackground(Palette.row)
+            NavigationLink {
+                InboxSettingsView()
+            } label: {
+                LabeledContent {
+                    Text(inboxAddress ?? "Off")
+                        .lineLimit(1)
+                } label: {
+                    Label("Your Inbox", systemImage: "tray")
+                        .foregroundStyle(Palette.ink)
+                }
+            }
+            .listRowBackground(Palette.row)
+        } header: {
+            header("Mail")
+        } footer: {
+            Text("Replies wait at the relay or in your own inbox. Steward checks in at 9:00, 13:00 and 18:00, and whenever you open it.")
+        }
+        .onAppear { inboxAddress = InboxSettings.account?.address }
     }
 
     // MARK: App

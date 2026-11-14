@@ -52,9 +52,10 @@ enum CaseService {
             RelayPush.connection = connection
             return connection
         case nil, "none":
-            // Release, and `-uiState none`: the live relay once it exists.
-            guard let url = RelaySettings.production else { return nil }
-            let connection = RelayConnection(baseURL: url, invite: nil)
+            // Release, and `-uiState none`: the relay the owner chose in the
+            // Steward tab (Steward's by default), or none.
+            guard let chosen = RelaySettings.chosen else { return nil }
+            let connection = RelayConnection(baseURL: chosen.url, invite: chosen.invite)
             RelayPush.connection = connection
             return connection
         default:

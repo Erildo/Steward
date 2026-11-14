@@ -22,5 +22,9 @@ struct StewardApp: App {
         .backgroundTask(.appRefresh(ReviewRunner.taskID)) {
             await ReviewRunner.runInBackground()
         }
+        // Errand check-ins, a few times a day (docs/adr/0003).
+        .backgroundTask(.appRefresh(CheckIn.taskID)) {
+            await CheckIn.run(inBackground: true)
+        }
     }
 }

@@ -132,6 +132,7 @@ final class CaseRunner {
         case .closed where file.closure?.status == .done && file.outcomeCheck?.answer == nil && !file.isConfirmedByOwner: file.outcomeCheck?.due
         default: nil
         }
+        if LocalWake.isNeeded { LocalWake.set(file.id, at: at) }
         Task {
             guard let client = try? await relay.client() else { return }
             if let at { try? await client.setWake(relayCaseID, at: at) } else { try? await client.clearWake(relayCaseID) }
@@ -148,6 +149,7 @@ final class CaseRunner {
         relayLog.notice("Refreshing from the relay")
         let task = Task { @MainActor in
             await collectRelayMail()
+            await collectInboxMail()
             await runDueTimers()
         }
         refreshing = task
@@ -194,6 +196,36 @@ final class CaseRunner {
         }
     }
 
+    /// Replies that went to the owner's own inbox instead of the case's
+    /// address, when they connected one (docs/adr/0003). The inbox is only
+    /// read past where the last check stopped, and that mark only moves once
+    /// every reply found is safely in its case.
+    private func collectInboxMail() async {
+        guard let check = InboxSettings.check() else { return }
+        let cases = knownCases()
+        let cursor = InboxSettings.cursor
+        do {
+            let (deliveries, next) = try await InboxSettings.withTimeout(25) { try await check.run(cases: cases, cursor: cursor) }
+            relayLog.notice("Inbox check found \(deliveries.count) reply(s)")
+            var kept = true
+            for delivery in deliveries {
+                do {
+                    _ = try await wake(delivery.caseID, with: .mail([delivery.email]), from: .relay)
+                } catch is Agent.WakeFailed {
+                    // The case kept the email before the wake stopped.
+                } catch {
+                    kept = false
+                    relayLog.error("Couldn't hand an inbox reply to its case: \(String(describing: error), privacy: .public)")
+                }
+            }
+            if kept { InboxSettings.cursor = next }
+            InboxSettings.recordSuccess()
+        } catch {
+            relayLog.error("Inbox check failed: \(String(describing: error), privacy: .public)")
+            InboxSettings.recordProblem((error as? IMAPError)?.message ?? "Steward couldn't reach your mail server.")
+        }
+    }
+
     /// Cases whose wait has run out get the timer wake they asked for.
     private func runDueTimers() async {
         for file in knownCases() {
@@ -201,6 +233,9 @@ final class CaseRunner {
             _ = try? await wake(file.id, with: .timer, from: .relay)
         }
     }
+
+    /// Every case, for check-ins: those loaded this launch and those only on disk.
+    func allCases() -> [CaseFile] { knownCases() }
 
     /// Every case: those loaded this launch and those only on disk.
     private func knownCases() -> [CaseFile] {
@@ -228,13 +263,13 @@ extension CaseRunner {
     }
 
     /// Real mail through the relay at `url` (`-uiState relay` in debug, with
-    /// `-relayURL`). The model is reached through the relay's proxy, unless a
-    /// debug key is given, or `-agentModel scripted` asks for the scripted
-    /// demo run.
+    /// `-relayURL`). The model is the owner's own key if they added one,
+    /// otherwise the relay's proxy, unless a debug key is given, or
+    /// `-agentModel scripted` asks for the scripted demo run.
     static func relay(connection: RelayConnection) -> CaseRunner {
         let model: any ModelClient = RelaySettings.model == "scripted"
             ? SimulatedErrand.model()
-            : debugModel() ?? RelayModel(connection: connection, model: RelaySettings.model)
+            : debugModel() ?? ModelAccess.ownModel() ?? RelayModel(connection: connection, model: RelaySettings.model)
         return CaseRunner(agent: Agent(model: model, mail: RelayConnectionMailer(connection: connection)), mailbox: nil, relay: connection)
     }
 

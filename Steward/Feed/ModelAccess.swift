@@ -1,12 +1,11 @@
 import Foundation
-import Security
 import StewardCore
 
 /// The one place the app gets a model, for tasks, the feed and the review.
 ///
-/// The owner never handles a key. In order:
-/// 1. a provisioned key in the Keychain slot below (nothing writes it yet:
-///    the relay may one day create a capped key for each phone),
+/// The owner never has to handle a key. In order:
+/// 1. the owner's own key, if they added one in the Steward tab (it takes
+///    the relay off the model path entirely, docs/adr/0003),
 /// 2. a debug key from the launch environment, like chat's `-uiState agent`,
 /// 3. the relay's model proxy, with the relay's key and its daily cap, once
 ///    this phone has a relay (`CaseService.relayConnection`).
@@ -23,7 +22,7 @@ nonisolated enum ModelAccess {
     /// `searchesWeb`, one that can look things up on the web.
     @MainActor
     static func model(searchesWeb: Bool) -> (any ModelClient)? {
-        if let setup = provisioned() ?? debugSetup() {
+        if let setup = ownKey() ?? debugSetup() {
             let name = searchesWeb ? withWebSearch(setup.model, on: setup.baseURL) : setup.model
             return OpenAICompatibleClient(baseURL: setup.baseURL, model: name, apiKey: setup.key)
         }
@@ -45,27 +44,32 @@ nonisolated enum ModelAccess {
 
     // MARK: Sources
 
-    /// The Keychain slot a provisioned key will fill. Nothing writes it yet.
-    private static func provisioned() -> Setup? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.steward.model",
-            kSecAttrAccount as String: "feed",
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data,
-              let stored = try? JSONDecoder().decode(Stored.self, from: data)
-        else { return nil }
-        return Setup(key: stored.key, model: stored.model, baseURL: stored.baseURL)
-    }
+    /// The owner's own key: any OpenAI-compatible provider, OpenRouter by
+    /// default. Kept in the Keychain on this phone only.
+    static let ownKeySlot = KeychainSlot(service: "com.steward.model", account: "feed")
 
-    private struct Stored: Decodable {
+    struct OwnKey: Codable, Equatable {
         var key: String
         var model: String
         var baseURL: URL
+    }
+
+    static func ownKey() -> Setup? {
+        guard let data = ownKeySlot.read(), let stored = try? JSONDecoder().decode(OwnKey.self, from: data) else { return nil }
+        return Setup(key: stored.key, model: stored.model, baseURL: stored.baseURL)
+    }
+
+    static var hasOwnKey: Bool { ownKey() != nil }
+
+    static func saveOwnKey(_ own: OwnKey) throws {
+        try ownKeySlot.write(JSONEncoder().encode(own))
+    }
+
+    static func removeOwnKey() { ownKeySlot.delete() }
+
+    /// The owner's own key as a model client, for the errand agent too.
+    static func ownModel() -> (any ModelClient)? {
+        ownKey().map { OpenAICompatibleClient(baseURL: $0.baseURL, model: $0.model, apiKey: $0.key) }
     }
 
     /// Debug runs only: `STEWARD_MODEL_KEY` in the launch environment, plus

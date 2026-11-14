@@ -5,6 +5,7 @@
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>esh.steward.review</string>
+		<string>esh.steward.checkin</string>
 	</array>
 	<key>UIBackgroundModes</key>
 	<array>
