@@ -199,6 +199,7 @@ private struct ConversationRow: View {
         case .timeline(let v): v.title
         case .proof(let v): v.headline
         case .checklist(let v): "\(v.title): \(v.doneCount) of \(v.items.count) done"
+        case .chart(let v): v.title ?? "A chart"
         }
     }
 

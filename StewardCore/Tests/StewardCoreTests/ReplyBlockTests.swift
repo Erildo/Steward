@@ -61,3 +61,54 @@ private func json(_ text: String) throws -> JSONValue {
     #expect(ReplyBlock.fromModel(nil).isEmpty)
     #expect(ReplyBlock.fromModel(.string("x")).isEmpty)
 }
+
+@Test func chartRoundTripsWithItsWhatIf() throws {
+    let chart = ReplyBlock.chart(.init(
+        style: .trend, unit: "km",
+        points: [.init(label: "2 weeks ago", value: 12), .init(label: "This week", value: 14)],
+        highlight: 1, target: 20,
+        whatIf: .init(label: "Runs a week", current: 3, lower: 2, upper: 6, effect: 5, drift: 1, horizon: 6)
+    ))
+    let data = try JSONEncoder().encode(chart)
+    #expect(String(decoding: data, as: UTF8.self).contains(#""type":"chart""#))
+    #expect(try JSONDecoder().decode(ReplyBlock.self, from: data) == chart)
+}
+
+@Test func chartWhatIfMovesTheProjection() {
+    let trend = ReplyBlock.Chart(
+        style: .trend, unit: "km",
+        points: [.init(label: "a", value: 13), .init(label: "b", value: 14)],
+        target: 20,
+        whatIf: .init(label: "Runs a week", current: 3, lower: 2, upper: 6, effect: 5, drift: 1, horizon: 8)
+    )
+    // As things are: 15, 16, ... reaches 20 on the sixth week ahead.
+    #expect(trend.pointsToTarget(3) == 6)
+    // One more run a week: 20 on the first week ahead.
+    #expect(trend.projected(4).projection.first == 20)
+    #expect(trend.pointsToTarget(4) == 1)
+
+    let bars = ReplyBlock.Chart(
+        style: .bars, unit: "days to finish",
+        points: [.init(label: "Email", value: 1.5), .init(label: "Phone call", value: 9)],
+        highlight: 1,
+        whatIf: .init(label: "Calls tried by email first", current: 0, lower: 0, upper: 4, effect: -1.875)
+    )
+    #expect(bars.projected(4).points[1].value == 1.5)
+    #expect(bars.projected(0).points == bars.points)
+}
+
+@Test func modelChartsAreCleanedOrDropped() throws {
+    let value = try json("""
+    [
+      {"type": "chart", "style": "bars", "unit": "days", "points": [{"label": "Email", "value": 2}], "highlight": 0},
+      {"type": "chart", "style": "columns", "unit": "tasks", "highlight": 9, "target": 3,
+       "points": [{"label": "Mon", "value": 1}, {"label": "Tue", "value": -4}, {"label": "Sun", "value": 9}]}
+    ]
+    """)
+    let blocks = ReplyBlock.fromModel(value)
+    #expect(blocks.count == 1)
+    guard case .chart(let chart) = blocks.first else { Issue.record("expected chart"); return }
+    #expect(chart.points.map(\.label) == ["Mon", "Sun"])
+    #expect(chart.highlight == nil)
+    #expect(chart.target == nil)
+}

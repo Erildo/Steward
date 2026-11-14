@@ -56,6 +56,7 @@ struct ReplyBlockView: View {
         case .timeline(let v): TimelineTicket(timeline: v)
         case .proof(let v): ProofTicket(proof: v)
         case .checklist(let v): ChecklistTicket(checklist: v, index: index, context: context)
+        case .chart(let v): ChartTicket(chart: v)
         }
     }
 }

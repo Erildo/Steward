@@ -25,8 +25,7 @@ struct RootTabView: View {
                 FeedView()
             }
             Tab("Insights", systemImage: "lightbulb", value: AppTab.insights) {
-                PlaceholderView(title: "Insights", systemImage: "lightbulb",
-                                message: "What Steward notices about your errands will appear here.")
+                InsightsView()
             }
             Tab("Tasks", systemImage: "checkmark.square", value: AppTab.tasks) {
                 TasksView(model: tasks)

@@ -28,6 +28,9 @@ public enum ReplyBlock: Codable, Sendable, Equatable {
     case proof(Proof)
     /// What's left for the owner, ticked off in place.
     case checklist(Checklist)
+    /// Numbers drawn as a chart, with the part that matters picked out, and
+    /// optionally a "what if" the owner can change.
+    case chart(Chart)
 
     // MARK: Payloads
 
@@ -189,10 +192,109 @@ public enum ReplyBlock: Codable, Sendable, Equatable {
         public var doneCount: Int { items.filter(\.done).count }
     }
 
+    public struct Chart: Codable, Sendable, Equatable {
+        public enum Style: String, Codable, Sendable {
+            /// Labelled bars to compare, such as days to finish by channel.
+            case bars
+            /// One column per labelled period, such as the days of a week.
+            case columns
+            /// A series over time, oldest first, optionally against a target.
+            case trend
+        }
+        public struct Point: Codable, Sendable, Equatable {
+            /// "Mon", "Email", "6 weeks ago".
+            public var label: String
+            public var value: Double
+            public init(label: String, value: Double) {
+                self.label = label
+                self.value = value
+            }
+        }
+        /// An input the owner can change to see the result move.
+        public struct WhatIf: Codable, Sendable, Equatable {
+            /// What the owner changes: "Runs a week".
+            public var label: String
+            /// The value today.
+            public var current: Double
+            public var lower: Double
+            public var upper: Double
+            public var step: Double
+            /// Change per step away from `current`. For a trend it shifts the
+            /// projected weeks; for bars and columns it moves the picked-out mark.
+            public var effect: Double
+            /// Trend only: change per projected point when nothing changes.
+            public var drift: Double
+            /// Trend only: how many points to project ahead.
+            public var horizon: Int
+            /// Trend only: what one point stands for, singular: "week".
+            public var period: String
+            public init(label: String, current: Double, lower: Double, upper: Double, step: Double = 1,
+                        effect: Double, drift: Double = 0, horizon: Int = 8, period: String = "week") {
+                self.label = label
+                self.current = current
+                self.lower = lower
+                self.upper = upper
+                self.step = step
+                self.effect = effect
+                self.drift = drift
+                self.horizon = horizon
+                self.period = period
+            }
+        }
+        /// The finding in words, when the chart stands alone in a reply.
+        public var title: String?
+        public var style: Style
+        /// What the values count, in words: "km", "days to finish".
+        public var unit: String
+        public var points: [Point]
+        /// The mark the answer is about; for a trend, the latest by default.
+        public var highlight: Int?
+        /// Trend only: a dashed line to reach, per point.
+        public var target: Double?
+        public var whatIf: WhatIf?
+        public init(title: String? = nil, style: Style, unit: String, points: [Point], highlight: Int? = nil,
+                    target: Double? = nil, whatIf: WhatIf? = nil) {
+            self.title = title
+            self.style = style
+            self.unit = unit
+            self.points = points
+            self.highlight = highlight
+            self.target = target
+            self.whatIf = whatIf
+        }
+
+        /// The values with the owner's "what if" applied: bars and columns move
+        /// the picked-out mark; a trend gains projected points after the last.
+        public func projected(_ input: Double?) -> (points: [Point], projection: [Double]) {
+            guard let whatIf, let input else { return (points, []) }
+            let shift = (input - whatIf.current) / max(whatIf.step, .ulpOfOne) * whatIf.effect
+            switch style {
+            case .bars, .columns:
+                guard let highlight, points.indices.contains(highlight) else { return (points, []) }
+                var moved = points
+                moved[highlight].value = max(0, moved[highlight].value + shift)
+                return (moved, [])
+            case .trend:
+                guard let last = points.last?.value else { return (points, []) }
+                let ahead = (1...max(whatIf.horizon, 1)).map { max(0, last + shift + Double($0) * whatIf.drift) }
+                return (points, ahead)
+            }
+        }
+
+        /// Trend with a target: how many projected points until it is reached,
+        /// or `nil` if not within the horizon.
+        public func pointsToTarget(_ input: Double?) -> Int? {
+            guard style == .trend, let target else { return nil }
+            if let last = points.last?.value, last >= target { return 0 }
+            let ahead = projected(input).projection
+            return ahead.firstIndex { $0 >= target }.map { $0 + 1 }
+        }
+    }
+
     // MARK: Coding
 
     public enum Kind: String, Codable, Sendable, CaseIterable {
-        case choices, field, steps, deadline, draft, compare, timeline, proof, checklist
+        case choices, field, steps, deadline, draft, compare, timeline, proof, checklist, chart
     }
 
     public var kind: Kind {
@@ -206,6 +308,7 @@ public enum ReplyBlock: Codable, Sendable, Equatable {
         case .timeline: .timeline
         case .proof: .proof
         case .checklist: .checklist
+        case .chart: .chart
         }
     }
 
@@ -223,6 +326,7 @@ public enum ReplyBlock: Codable, Sendable, Equatable {
         case .timeline: self = .timeline(try Timeline(from: decoder))
         case .proof: self = .proof(try Proof(from: decoder))
         case .checklist: self = .checklist(try Checklist(from: decoder))
+        case .chart: self = .chart(try Chart(from: decoder))
         }
     }
 
@@ -239,6 +343,7 @@ public enum ReplyBlock: Codable, Sendable, Equatable {
         case .timeline(let v): try v.encode(to: encoder)
         case .proof(let v): try v.encode(to: encoder)
         case .checklist(let v): try v.encode(to: encoder)
+        case .chart(let v): try v.encode(to: encoder)
         }
     }
 }
@@ -249,7 +354,7 @@ extension ReplyBlock {
     /// What a model may show on its own. Drafts and proof only ever come from
     /// a real case (an email waiting for approval, a company's confirmation),
     /// so a model can't put an Approve button or a "Done" stamp on screen.
-    public static let modelKinds: [Kind] = [.choices, .field, .deadline, .compare, .timeline, .checklist]
+    public static let modelKinds: [Kind] = [.choices, .field, .deadline, .compare, .timeline, .checklist, .chart]
 
     /// Most blocks one reply carries. More than this is a page, not a reply.
     public static let maxPerReply = 3
@@ -334,6 +439,28 @@ extension ReplyBlock {
             v.title = clean(v.title, 80)
             v.items = Array(v.items.map { .init(title: clean($0.title, 120), done: $0.done) }.filter { !$0.title.isEmpty }.prefix(12))
             return v.items.isEmpty ? nil : .checklist(v)
+        case .chart(var v):
+            v.title = cleanOptional(v.title, 80)
+            v.unit = clean(v.unit, 40)
+            v.points = Array(v.points.map { .init(label: clean($0.label, 24), value: $0.value) }
+                .filter { !$0.label.isEmpty && $0.value.isFinite && $0.value >= 0 }.prefix(12))
+            if let highlight = v.highlight, !v.points.indices.contains(highlight) { v.highlight = nil }
+            if let target = v.target, !target.isFinite || target < 0 || v.style != .trend { v.target = nil }
+            if let w = v.whatIf {
+                let numbers = [w.current, w.lower, w.upper, w.step, w.effect, w.drift]
+                let valid = numbers.allSatisfy(\.isFinite) && w.lower <= w.current && w.current <= w.upper && w.step > 0
+                    && (v.style == .trend || v.highlight != nil)
+                if valid {
+                    var clipped = w
+                    clipped.label = clean(w.label, 40)
+                    clipped.horizon = min(max(w.horizon, 1), 12)
+                    clipped.period = clean(w.period, 12).isEmpty ? "week" : clean(w.period, 12)
+                    v.whatIf = clipped.label.isEmpty ? nil : clipped
+                } else {
+                    v.whatIf = nil
+                }
+            }
+            return v.points.count < 2 ? nil : .chart(v)
         }
     }
 
@@ -365,11 +492,13 @@ extension ReplyBlock {
             "title": string("What happens."),
             "detail": string("One optional line of detail."),
         ], required: ["title"])
+        let point = object(["label": string("Short label: \"Mon\", \"Email\", \"3 weeks ago\"."),
+                             "value": .object(["type": .string("number")])], required: ["label", "value"])
         let block = object([
             "type": .object([
                 "type": .string("string"),
                 "enum": .array(modelKinds.map { .string($0.rawValue) }),
-                "description": .string("choices: short answers to tap. field: one value to type. deadline: a date that matters. compare: 2 to 4 options side by side. timeline: a plan in order. checklist: things the owner must do, which they tick off."),
+                "description": .string("choices: short answers to tap. field: one value to type. deadline: a date that matters. compare: 2 to 4 options side by side. timeline: a plan in order. checklist: things the owner must do, which they tick off. chart: real numbers the owner gave or Steward measured, drawn as bars, columns or a trend; never estimates presented as facts."),
             ]),
             "options": .object([
                 "type": .string("array"),
@@ -379,10 +508,16 @@ extension ReplyBlock {
             "label": string("field: what you ask for, such as \"Membership email\"."),
             "kind": .object(["type": .string("string"), "enum": .array(["text", "email", "phone", "number", "date"].map { .string($0) })]),
             "placeholder": string("field: an example value."),
-            "title": string("deadline, compare, timeline, checklist: the headline."),
+            "title": string("deadline, compare, timeline, checklist, chart: the headline."),
             "progress": .object(["type": .string("number"), "description": .string("deadline: share of the time already passed, 0 to 1.")]),
             "rows": array(of: row, "deadline: up to 4 dated facts."),
             "items": array(of: item, "timeline: the steps in order. checklist: one item per thing to do, with only a title."),
+            "style": .object(["type": .string("string"), "enum": .array(["bars", "columns", "trend"].map { .string($0) }),
+                              "description": .string("chart: bars to compare, columns per period, trend over time (oldest first).")]),
+            "unit": string("chart: what the values count, such as \"km\" or \"days to finish\"."),
+            "points": array(of: point, "chart: 2 to 12 labelled values."),
+            "highlight": .object(["type": .string("integer"), "description": .string("chart: index of the point the answer is about.")]),
+            "target": .object(["type": .string("number"), "description": .string("chart, trend only: a goal line.")]),
         ], required: ["type"])
         return array(of: block, "Optional. Interface to show with your words, only when it saves the owner typing or reading. Most replies need none.")
     }()
@@ -413,6 +548,9 @@ extension ReplyBlock {
             return "[Proof: \(v.headline)]"
         case .checklist(let v):
             return "[\(v.title), \(v.doneCount) of \(v.items.count) done: " + v.items.map { "\($0.done ? "[x]" : "[ ]") \($0.title)" }.joined(separator: "; ") + "]"
+        case .chart(let v):
+            let values = v.points.map { "\($0.label) \($0.value.formatted(.number.precision(.fractionLength(0...1))))" }
+            return "[\(v.title ?? "Chart"), \(v.unit): " + values.joined(separator: "; ") + (v.target.map { "; target \($0)" } ?? "") + "]"
         }
     }
 }

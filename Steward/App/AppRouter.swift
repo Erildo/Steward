@@ -15,8 +15,13 @@ enum ChatRoute: Hashable {
 /// handed to Steward opening Chat with the request already written.
 @Observable
 final class AppRouter {
-    /// Tasks launch states open on Tasks; everything else on Chat.
-    var tab: AppTab = (UserDefaults.standard.string(forKey: "uiState") ?? "").hasPrefix("tasks") ? .tasks : .chat
+    /// Tasks and Insights launch states open on their tab; everything else on Chat.
+    var tab: AppTab = {
+        let state = UserDefaults.standard.string(forKey: "uiState") ?? ""
+        if state.hasPrefix("tasks") { return .tasks }
+        if state.hasPrefix("insights") { return .insights }
+        return .chat
+    }()
     /// Chat's stack above the Chats list.
     var chatPath: [ChatRoute] = []
     /// Text for a new chat's composer. The new chat takes it and clears it.

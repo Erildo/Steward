@@ -552,6 +552,25 @@ extension StewardTask {
         ]
         moving.state = .done(date: now.addingTimeInterval(-540), confirmedByOwner: false)
         moving.result = "Move-out plan and checklist."
-        return [mealKit, moving]
+
+        // A shown answer: the same chart block Insights uses, with a "what if".
+        var running = StewardTask(goal: "Am I on track for the half marathon?", createdAt: now.addingTimeInterval(-300))
+        running.messages = [
+            .init(author: .owner, text: "Am I on track for the half marathon?", date: now.addingTimeInterval(-300)),
+            .init(author: .steward, text: "Mostly. Your weekly distance is up from 8 to 14 km, but late meetings keep costing you a run. One more run a week gets you to 20 km almost at once.",
+                  date: now.addingTimeInterval(-280), blocks: [
+                .chart(.init(title: "Weekly distance", style: .trend, unit: "km",
+                             points: [8, 11, 12, 10, 13, 14].enumerated().map { index, value in
+                                 let ago = 5 - index
+                                 return .init(label: ago == 0 ? "This week" : "\(ago) weeks ago", value: value)
+                             },
+                             target: 20,
+                             whatIf: .init(label: "Runs a week", current: 3, lower: 2, upper: 5,
+                                           effect: 5, drift: 1, horizon: 8))),
+            ]),
+        ]
+        running.state = .done(date: now.addingTimeInterval(-280), confirmedByOwner: false)
+        running.result = "Running progress with a what-if."
+        return [mealKit, moving, running]
     }
 }
