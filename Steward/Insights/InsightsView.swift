@@ -4,7 +4,7 @@ import SwiftUI
 /// how they tend to work, each with its proof and a next step, then what
 /// Steward has finished for them.
 struct InsightsView: View {
-    @State private var model = InsightsModel.launch()
+    @Environment(InsightsModel.self) private var model
     @State private var showsKnown = false
 
     var body: some View {

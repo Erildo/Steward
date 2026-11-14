@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 /// The five sections, as values the tab bar can select.
-enum AppTab: Hashable { case chat, feed, insights, tasks, apps }
+enum AppTab: Hashable { case chat, feed, insights, tasks, steward }
 
 /// A screen in Chat's stack, above the Chats list.
 enum ChatRoute: Hashable {
@@ -20,6 +20,7 @@ final class AppRouter {
         let state = UserDefaults.standard.string(forKey: "uiState") ?? ""
         if state.hasPrefix("tasks") { return .tasks }
         if state.hasPrefix("insights") { return .insights }
+        if state.hasPrefix("steward") { return .steward }
         return .chat
     }()
     /// Chat's stack above the Chats list.
@@ -38,6 +39,15 @@ final class AppRouter {
     func openConversation(_ id: UUID) {
         chatPath = [.conversation(id)]
         tab = .chat
+    }
+
+    /// A task for Tasks to open, from another tab. Tasks takes it and clears it.
+    var taskToOpen: UUID?
+
+    /// Shows one task in Tasks, such as the task a file belongs to.
+    func openTask(_ id: UUID) {
+        taskToOpen = id
+        tab = .tasks
     }
 
     func newChat() {

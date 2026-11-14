@@ -130,7 +130,7 @@ struct StewardAvatar: View {
 /// avatar cuts the eyes out so the ink behind shows through; the ginger one
 /// paints dark eyes on top. One head shape means no seams, even under Liquid
 /// Glass, which treats overlapping layers separately.
-nonisolated private struct CatShape: Shape {
+nonisolated struct CatShape: Shape {
     /// 1 is open, near 0 is a blink.
     var eyeOpen: CGFloat
     /// At pill size, slightly bigger eyes so they stay bright, not a smudge.
@@ -166,7 +166,7 @@ nonisolated private struct CatShape: Shape {
     }
 }
 
-nonisolated private struct CatEyes: Shape {
+nonisolated struct CatEyes: Shape {
     var eyeOpen: CGFloat
     var small: Bool
 

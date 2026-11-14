@@ -9,12 +9,30 @@ struct RootTabView: View {
     @State private var tasks: TasksModel
     /// Chat's engine: routes what the owner writes and runs the errand under way.
     @State private var chat: ChatModel
+    /// Shared by Insights and the Steward tab, which both open "What Steward Knows".
+    @State private var insights = InsightsModel.launch()
+    /// What Steward can reach and holds, for the Steward tab.
+    @State private var steward: StewardTabModel
+    @AppStorage(AppLock.storageKey) private var locks = false
+    @State private var locked = UserDefaults.standard.bool(forKey: AppLock.storageKey)
+    /// Ask once per return. The Face ID sheet itself makes the app inactive
+    /// and active again, which must not ask a second time.
+    @State private var asksOnActive = UserDefaults.standard.bool(forKey: AppLock.storageKey)
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
         let tasks = TasksModel.launch()
         _tasks = State(initialValue: tasks)
         _chat = State(initialValue: ChatModel.launch(tasks: tasks))
+        _steward = State(initialValue: StewardTabModel.launch(tasks: tasks))
+    }
+
+    private func unlock() {
+        Task {
+            if case .success = await AppLock.authenticate(reason: "Unlock Steward") {
+                withAnimation { locked = false }
+            }
+        }
     }
 
     var body: some View {
@@ -32,35 +50,38 @@ struct RootTabView: View {
                 TasksView(model: tasks)
             }
             .badge(tasks.needsYouCount)
-            Tab("Apps", systemImage: "square.grid.2x2", value: AppTab.apps) {
-                PlaceholderView(title: "Connected Apps", systemImage: "square.grid.2x2",
-                                message: "Services you connect to Steward will appear here.")
+            Tab(value: AppTab.steward) {
+                StewardTabView()
+            } label: {
+                Label {
+                    Text("Steward")
+                } icon: {
+                    Image(uiImage: StewardTabGlyph.image)
+                }
             }
+            .badge(steward.apps.filter(\.needsSignIn).count)
         }
         .tint(Palette.orange)
         .environment(router)
         .environment(profile)
         .environment(tasks)
         .environment(chat)
+        .environment(insights)
+        .environment(steward)
+        .overlay {
+            if locked {
+                LockCover { unlock() }
+                    .transition(.opacity)
+            }
+        }
         .preferredColorScheme(appearance.colorScheme)
         // Mail and follow-up times that came due while Steward wasn't looking.
         .onChange(of: scenePhase, initial: true) { _, phase in
+            if phase == .background, locks { locked = true; asksOnActive = true }
+            if phase == .active, asksOnActive { asksOnActive = false; unlock() }
             guard phase == .active, let runner = CaseService.runner else { return }
             Task { await runner.refresh() }
         }
     }
 }
 
-private struct PlaceholderView: View {
-    let title: String
-    let systemImage: String
-    let message: String
-
-    var body: some View {
-        NavigationStack {
-            ContentUnavailableView(title, systemImage: systemImage, description: Text(message))
-                .navigationTitle(title)
-                .background(Palette.ground)
-        }
-    }
-}

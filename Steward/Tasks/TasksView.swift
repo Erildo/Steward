@@ -7,6 +7,7 @@ struct TasksView: View {
     @Bindable var model: TasksModel
 
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(AppRouter.self) private var router
     @State private var path: [UUID] = []
     /// The add sheet, with what it opens with.
     @State private var adding: AddRequest?
@@ -46,6 +47,11 @@ struct TasksView: View {
         }
         .sheet(isPresented: $showsProfile) { ProfileSheet() }
         .onAppear { model.reload() }
+        .onChange(of: router.taskToOpen, initial: true) {
+            guard let id = router.taskToOpen else { return }
+            path = [id]
+            router.taskToOpen = nil
+        }
         .onChange(of: scenePhase) {
             if scenePhase == .active { model.reload() }
         }
