@@ -231,14 +231,11 @@ extension CaseRunner {
     /// `-relayURL`). The model is reached through the relay's proxy, unless a
     /// debug key is given, or `-agentModel scripted` asks for the scripted
     /// demo run.
-    static func relay(url: URL, invite: String?) -> CaseRunner {
-        let connection = RelayConnection(baseURL: url, invite: invite)
+    static func relay(connection: RelayConnection) -> CaseRunner {
         let model: any ModelClient = RelaySettings.model == "scripted"
             ? SimulatedErrand.model()
             : debugModel() ?? RelayModel(connection: connection, model: RelaySettings.model)
-        let runner = CaseRunner(agent: Agent(model: model, mail: RelayConnectionMailer(connection: connection)), mailbox: nil, relay: connection)
-        RelayPush.connection = connection
-        return runner
+        return CaseRunner(agent: Agent(model: model, mail: RelayConnectionMailer(connection: connection)), mailbox: nil, relay: connection)
     }
 
     /// The Tasks sample (`-uiState tasks`): simulated mail that no company

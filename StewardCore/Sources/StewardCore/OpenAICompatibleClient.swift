@@ -3,6 +3,15 @@ import Foundation
 /// Talks to any OpenAI-compatible chat completions endpoint: OpenRouter, a
 /// provider directly, or (in the app) Steward's relay, which adds its own key.
 public struct OpenAICompatibleClient: ModelClient {
+    /// Sorted keys, so the same tools and history encode to the same bytes on
+    /// every launch: Swift dictionaries otherwise come out in a random order,
+    /// and the provider's prompt cache misses on every request.
+    static let encoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return encoder
+    }()
+
     public var baseURL: URL
     public var model: String
     public var apiKey: String?
@@ -28,7 +37,7 @@ public struct OpenAICompatibleClient: ModelClient {
         request.timeoutInterval = 180
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let apiKey { request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
-        request.httpBody = try JSONEncoder().encode(Request(model: model, system: system, messages: messages, tools: tools))
+        request.httpBody = try Self.encoder.encode(Request(model: model, system: system, messages: messages, tools: tools))
 
         let (data, response) = try await session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -80,7 +89,7 @@ public struct OpenAICompatibleClient: ModelClient {
                 self.init(role: "assistant", content: text)
                 if !calls.isEmpty {
                     tool_calls = calls.map { call in
-                        let args = (try? JSONEncoder().encode(call.arguments)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
+                        let args = (try? OpenAICompatibleClient.encoder.encode(call.arguments)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
                         return WireCall(id: call.id, function: .init(name: call.name, arguments: args))
                     }
                 }

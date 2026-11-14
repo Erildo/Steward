@@ -28,7 +28,7 @@ struct KnownView: View {
                 } header: {
                     header("Steward's guesses")
                 } footer: {
-                    Text("Guesses come from patterns in your chats, tasks and Feed. Forget one and Steward stops using it.")
+                    Text("Guesses come from patterns in your chats, tasks and Feed. Swipe to say one is right, or forget it and Steward stops using it.")
                 }
 
                 Section {
@@ -89,8 +89,19 @@ struct KnownView: View {
             Button("Forget", systemImage: "trash", role: .destructive) {
                 withAnimation { model.forget(item) }
             }
+            if item.isGuess {
+                Button("That's Right", systemImage: "checkmark") {
+                    withAnimation { model.confirm(item) }
+                }
+                .tint(Palette.orange)
+            }
         }
         .contextMenu {
+            if item.isGuess {
+                Button("That's Right", systemImage: "checkmark") {
+                    withAnimation { model.confirm(item) }
+                }
+            }
             Button("Forget", systemImage: "trash", role: .destructive) {
                 withAnimation { model.forget(item) }
             }

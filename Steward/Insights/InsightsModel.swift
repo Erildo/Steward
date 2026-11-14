@@ -23,8 +23,8 @@ final class InsightsModel {
     let insights: [Insight]
     let wins: [Win]
     let winsSince: Date?
-    private(set) var known: [Known]
-    var topics: [Topic]
+    /// What Steward knows, shared with Tasks and the Steward tab.
+    let memory: MemoryBook
     let isSample: Bool
 
     private(set) var reactions: [UUID: Reaction] = [:]
@@ -35,15 +35,14 @@ final class InsightsModel {
     private(set) var lastHidden: Insight?
 
     init(weekOf: Date, readSummary: String?, lead: Insight?, insights: [Insight], wins: [Win],
-         winsSince: Date?, known: [Known], topics: [Topic], isSample: Bool) {
+         winsSince: Date?, memory: MemoryBook = .shared, isSample: Bool) {
         self.weekOf = weekOf
         self.readSummary = readSummary
         self.lead = lead
         self.insights = insights
         self.wins = wins
         self.winsSince = winsSince
-        self.known = known
-        self.topics = topics
+        self.memory = memory
         self.isSample = isSample
     }
 
@@ -82,8 +81,32 @@ final class InsightsModel {
         if lastHidden?.id == id { lastHidden = nil }
     }
 
+    /// Everything Steward knows, for the owner's eyes: topics turned off too.
+    var known: [Known] {
+        memory.memory.items.reversed().map { Known(id: $0.id, text: $0.text, source: $0.evidence, isGuess: $0.kind == .guess) }
+    }
+
+    /// The topics Steward may notice. Writing turns them on or off in memory.
+    var topics: [Topic] {
+        get {
+            memory.memory.topics.map { Topic(name: $0.name, systemImage: Self.topicImage($0.name), allowed: $0.allowed) }
+        }
+        set {
+            memory.update { m in for topic in newValue { m.setTopic(topic.name, allowed: topic.allowed) } }
+        }
+    }
+
     func forget(_ item: Known) {
-        known.removeAll { $0.id == item.id }
+        memory.update { $0.forget(item.id) }
+    }
+
+    /// "That's right": the owner confirms a guess, which makes it a fact.
+    func confirm(_ item: Known) {
+        memory.update { $0.confirm(item.id) }
+    }
+
+    func forgetEverything() {
+        memory.update { $0.forgetEverything() }
     }
 
     var facts: [Known] { known.filter { !$0.isGuess } }
@@ -94,25 +117,16 @@ final class InsightsModel {
     var totalMonthly: Decimal { wins.compactMap(\.monthly).reduce(0, +) }
 
     /// Everything Steward knows, as plain text the owner can keep.
-    var exportText: String {
-        var lines = ["What Steward knows about you", ""]
-        lines.append("You told Steward:")
-        lines += facts.map { "- \($0.text) (\($0.source))" }
-        lines.append("")
-        lines.append("Steward's guesses:")
-        lines += guesses.map { "- \($0.text) (\($0.source))" }
-        lines.append("")
-        lines.append("Off limits: " + topics.filter { !$0.allowed }.map(\.name).joined(separator: ", "))
-        return lines.joined(separator: "\n")
-    }
+    var exportText: String { memory.memory.exportText() }
 
-    static var defaultTopics: [Topic] {
-        [
-            Topic(name: "Health and sleep", systemImage: "heart", allowed: false),
-            Topic(name: "Mood", systemImage: "face.smiling", allowed: false),
-            Topic(name: "Relationships", systemImage: "person.2", allowed: false),
-            Topic(name: "Money and spending", systemImage: "creditcard", allowed: true),
-        ]
+    static func topicImage(_ name: String) -> String {
+        switch name {
+        case "Health and sleep": "heart"
+        case "Mood": "face.smiling"
+        case "Relationships": "person.2"
+        case "Money and spending": "creditcard"
+        default: "circle"
+        }
     }
 }
 
@@ -129,7 +143,7 @@ extension InsightsModel {
 
     static func empty() -> InsightsModel {
         InsightsModel(weekOf: Date.now.startOfWeek, readSummary: nil, lead: nil, insights: [], wins: [],
-                      winsSince: nil, known: [], topics: defaultTopics, isSample: false)
+                      winsSince: nil, isSample: false)
     }
 }
 
@@ -216,6 +230,28 @@ enum InsightsSample {
                                 request: "Find me two 20-minute slots a week for Italian and remind me before each one.")
             ),
             Insight(
+                kind: .goal,
+                title: "€3,000 for Lisbon in May",
+                detail: "You've put aside €1,300. May needs about €350 a month from here, and November is at €200. Takeaways went from one a week to four since September.",
+                status: "Behind",
+                statusNeedsYou: true,
+                chart: .init(style: .trend, unit: "euros",
+                             points: [.init(label: "August", value: 400), .init(label: "September", value: 350),
+                                      .init(label: "October", value: 350), .init(label: "November", value: 200)],
+                             target: 350,
+                             whatIf: .init(label: "Takeaways a week", current: 4, lower: 0, upper: 6,
+                                           effect: -50, horizon: 5, period: "month")),
+                confidence: .fairlySure,
+                basis: "4 balances you shared",
+                evidence: [
+                    .init(source: .you, text: "You set this goal on 12 August"),
+                    .init(source: .chat, text: "Savings balances you mentioned in 4 chats"),
+                    .init(source: .task, text: "Takeaway orders from 3 delivery receipts Steward filed"),
+                ],
+                nextStep: .init(label: "Set aside €350 on payday",
+                                request: "Remind me on payday to move €350 to my Lisbon savings.")
+            ),
+            Insight(
                 kind: .change,
                 title: "You've started cooking",
                 detail: "Recipes went from 3 saves in September to 12 so far in November, and you asked twice about kitchen knives.",
@@ -227,6 +263,22 @@ enum InsightsSample {
                 ],
                 nextStep: .init(label: "More weeknight recipes",
                                 request: "Add quick weeknight cooking to my Feed.")
+            ),
+            Insight(
+                kind: .change,
+                title: "Less is waiting on you",
+                detail: "Things that need your answer fell from 9 to 3 since you started handing errands to Steward. Most of what's left is one photo and two yeses.",
+                chart: .init(style: .trend, unit: "waiting on you",
+                             points: [.init(label: "5 weeks ago", value: 9), .init(label: "4 weeks ago", value: 8),
+                                      .init(label: "3 weeks ago", value: 6), .init(label: "2 weeks ago", value: 6),
+                                      .init(label: "Last week", value: 4), .init(label: "This week", value: 3)]),
+                confidence: .sure,
+                basis: "your task list",
+                evidence: [
+                    .init(source: .task, text: "Tasks marked \"needs you\" each Sunday, for 6 weeks"),
+                ],
+                nextStep: .init(label: "Clear the last three",
+                                request: "Walk me through the three things waiting on me, quickest first.")
             ),
             Insight(
                 kind: .aboutYou,
@@ -262,30 +314,56 @@ enum InsightsSample {
                 nextStep: .init(label: "Shorter reads",
                                 request: "Keep my Feed finds under 10 minutes.")
             ),
+            Insight(
+                kind: .aboutYou,
+                title: "Mornings are when you answer",
+                detail: "You reply to Steward within about 10 minutes before work, and after a couple of hours in the afternoon.",
+                chart: .init(style: .bars, unit: "minutes to reply",
+                             points: [.init(label: "Before 9 am", value: 10), .init(label: "Midday", value: 35),
+                                      .init(label: "Afternoon", value: 130), .init(label: "Evening", value: 25)],
+                             highlight: 0),
+                confidence: .fairlySure,
+                basis: "41 replies",
+                evidence: [
+                    .init(source: .chat, text: "41 replies to Steward's questions, timed, since 2 October"),
+                ],
+                nextStep: .init(label: "Ask me in the morning",
+                                request: "Save questions that can wait and ask me before 9 am.")
+            ),
+            Insight(
+                kind: .aboutYou,
+                title: "You trust drafts that sound like you",
+                detail: "You sent 14 of 20 drafts as written. The 5 you edited were all ones where Steward sounded too formal.",
+                chart: .init(style: .bars, unit: "drafts",
+                             points: [.init(label: "Sent as written", value: 14), .init(label: "Edited first", value: 5),
+                                      .init(label: "Declined", value: 1)],
+                             highlight: 0),
+                confidence: .sure,
+                basis: "20 drafts",
+                evidence: [
+                    .init(source: .task, text: "20 drafts you approved, edited or declined"),
+                    .init(source: .task, text: "Your edits: shorter openings, fewer \"Dear\"s"),
+                ],
+                nextStep: .init(label: "Write more like me",
+                                request: "Write my drafts shorter and less formal, like the ones I edited.")
+            ),
         ]
 
         let wins = [
             Win(title: "Refund from Northwind Air", date: day(-11), amount: 186, proof: .owner),
             Win(title: "Cancelled StreamBox", date: day(-17), monthly: 13.99, proof: .company),
             Win(title: "Double charge at FitWorld reversed", date: day(-24), amount: 49, proof: .company),
+            Win(title: "Broadband price rise reversed", date: day(-6), monthly: 8, proof: .company),
+            Win(title: "Parking fine appeal accepted", date: day(-14), amount: 60, proof: .company),
+            Win(title: "Headphones repaired under warranty", date: day(-20), proof: .owner),
             Win(title: "Passport appointment booked", date: day(-30), proof: .owner),
-        ]
-
-        let known = [
-            Known(text: "Training for a half marathon in April", source: "You said in a chat", isGuess: false),
-            Known(text: "Learning Italian", source: "You said in a chat", isGuess: false),
-            Known(text: "Lives in Berlin", source: "From your gym task", isGuess: false),
-            Known(text: "Started a new job on 19 October", source: "From a chat that day", isGuess: false),
-            Known(text: "Gets admin done on Sunday evenings", source: "From 14 tasks", isGuess: true),
-            Known(text: "Prefers email to phone calls", source: "From 18 tasks", isGuess: true),
-            Known(text: "Cooking more at home", source: "From 15 Feed saves", isGuess: true),
-        ]
+        ].sorted { $0.date > $1.date }
 
         return InsightsModel(
             weekOf: now.startOfWeek,
-            readSummary: "Steward read 14 chats, 9 tasks and 31 Feed reactions this week.",
+            readSummary: "Steward read 23 chats, 11 tasks and 31 Feed reactions this week.",
             lead: lead, insights: insights, wins: wins, winsSince: day(-43),
-            known: known, topics: InsightsModel.defaultTopics, isSample: true
+            isSample: true
         )
     }
 }

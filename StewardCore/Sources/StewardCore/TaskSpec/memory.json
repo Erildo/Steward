@@ -1,0 +1,6 @@
+{
+  "facts": "What the owner told you:",
+  "guesses": "Your own guesses about the owner. They are not confirmed: don't state them as fact, and don't act on one without asking.",
+  "off_limits": "The owner turned these topics off. Don't ask about them, guess about them or bring them up: {topics}.",
+  "nothing": "You know nothing about the owner yet beyond this task."
+}

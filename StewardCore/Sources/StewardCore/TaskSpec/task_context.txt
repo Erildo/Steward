@@ -1,0 +1,7 @@
+Today is {today}.
+
+{memory}
+
+Topics that matter for memory: {topics}.
+
+The task: {goal}

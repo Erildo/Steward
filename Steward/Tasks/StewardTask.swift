@@ -138,57 +138,29 @@ struct JSONListStore<Item: Codable> {
 // MARK: Agents
 
 /// A real model working on a general task. It can think, research (when the
-/// model searches the web) and draft; it can't act outside the phone yet, so
-/// it tells the owner what to do or hands the step back.
+/// model searches the web), draft and remember things about the owner; it
+/// can't act outside the phone yet, so it tells the owner what to do or hands
+/// the step back.
 struct ModelTaskAgent: TaskAgent {
     let model: any ModelClient
+    /// What Steward knows about the owner. Read into every turn, added to by `remember`.
+    var memory: MemoryBook? = nil
 
-    private static let system = """
-    You are Steward, a personal agent working for one person (the owner) on one task.
-    You can think, research and draft. You cannot yet send messages, pay, sign in, book or change anything outside this conversation, so never claim you did. When a step needs that, say exactly what the owner should do, or hand it back.
-    Be brief and concrete. Write in the owner's language. No jargon.
-    End every turn with exactly one tool call:
-    - ask_owner: you need something only the owner knows (one short question).
-    - finish: the task is done; put the full answer in `result`.
-    - wait: there's nothing to do until a later date (a reminder, a deadline).
-    - hand_back: the rest needs the owner; say why and what to do.
-    Every tool takes optional `blocks`: interface shown with your words on the owner's phone. Use one only when it saves typing or reading:
-    - choices: when the answer is one of a few, offer up to 4 short answers to tap.
-    - field: when you need one value (an email, a date, a number).
-    - compare: 2 to 4 options side by side, marking your pick.
-    - timeline: a plan in order (days, times, steps).
-    - deadline: a date that matters and what happens around it.
-    - checklist: things only the owner can do; they tick them off, and you'll see which are done.
-    Never repeat a block's content in your words; say the one line that matters and let the block carry the rest.
-    Short replies are one or two plain sentences. For a longer answer, use light Markdown: ## headings, - bullets, 1. numbered steps, **bold** for the few words that matter. No tables.
-    """
-
-    private static let tools: [ToolSpec] = [
-        ToolSpec(name: "ask_owner", description: "Ask the owner one short question and wait for the answer.",
-                 parameters: schema(["question": "The question, in one sentence."])),
-        ToolSpec(name: "finish", description: "The task is done. Give the owner the full result.",
-                 parameters: schema(["result": "The answer, plan, shortlist or draft, ready to use."])),
-        ToolSpec(name: "wait", description: "Come back to the task after some days.",
-                 parameters: schema(["note": "What happens then, in a few words."],
-                                    extra: ["days": .object(["type": .string("number"), "description": .string("Days from now.")])])),
-        ToolSpec(name: "hand_back", description: "The rest needs the owner. Say why and what to do.",
-                 parameters: schema(["reason": "Why, and the owner's next step."])),
-    ]
-
-    /// Required string fields, any other required fields, and the optional blocks.
-    private static func schema(_ fields: [String: String], extra: [String: JSONValue] = [:]) -> JSONValue {
-        var properties = fields.mapValues { JSONValue.object(["type": .string("string"), "description": .string($0)]) }
-        properties.merge(extra) { $1 }
-        properties["blocks"] = ReplyBlock.modelSchema
-        return .object([
-            "type": .string("object"),
-            "properties": .object(properties),
-            "required": .array((Array(fields.keys) + Array(extra.keys)).sorted().map { .string($0) }),
+    /// The prompt and tools live in StewardCore's `TaskSpec/`, not here. The
+    /// system prompt never changes; what does (the date, the memory) goes in
+    /// the first message, so the provider's prompt cache holds across turns.
+    private func context(for task: StewardTask) -> String {
+        let known = memory?.memory ?? Memory()
+        return TaskSpec.context([
+            "today": Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide).year()),
+            "memory": known.brief(),
+            "topics": known.topics.map(\.name).joined(separator: ", "),
+            "goal": task.goal,
         ])
     }
 
     func work(on task: StewardTask, wake: TaskWake) async throws -> StewardTask {
-        var messages: [ModelMessage] = [.user("The task: \(task.goal)")]
+        var messages: [ModelMessage] = [.user(context(for: task))]
         for message in task.messages {
             switch message.author {
             case .owner: messages.append(.user(message.text))
@@ -199,13 +171,38 @@ struct ModelTaskAgent: TaskAgent {
             }
         }
         if wake == .timer { messages.append(.user("The date you waited for has come. Carry on.")) }
+        // A fact is only something the owner just said (see `TaskLoop`).
+        let ownerJustSpoke = wake == .message || (wake == .start && task.messages.last?.author == .owner)
 
-        let turn = try await model.complete(system: Self.system, messages: messages, tools: Self.tools)
+        var copy: Memory? = memory?.memory
+        let outcome = try await TaskLoop(model: model).run(messages: messages, memory: &copy, ownerJustSpoke: ownerJustSpoke)
+        // Only what was added goes back, onto the live memory.
+        let kept = outcome.kept.filter { item in
+            guard let memory else { return false }
+            if case .refused = memory.remember(item) { return false }
+            return true
+        }.map(\.text)
+
         var next = task
-        let call = turn.toolCalls.first
-        let text = turn.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        switch outcome.end {
+        case .call(let call, let text):
+            finish(&next, call: call, text: text, kept: kept)
+        case .stuck:
+            next.say(.steward, "I kept going round in circles on this one, so I've stopped. Tell me how you'd like to go on.")
+            next.state = .handedBack(note: "Steward got stuck", date: .now)
+        }
+        return next
+    }
+
+    /// Ends the turn on the tool that ends it, or on plain words.
+    private func finish(_ next: inout StewardTask, call: ToolCall?, text rawText: String?, kept: [String]) {
+        let text = rawText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         func argument(_ key: String) -> String { call?.arguments[key]?.string ?? "" }
         let blocks = ReplyBlock.fromModel(call?.arguments["blocks"])
+        // Show the work: what Steward kept about the owner, before its reply.
+        if !kept.isEmpty {
+            next.say(.steward, "Noted for next time: " + kept.joined(separator: "; ") + ". You can see or forget it in What Steward Knows.")
+        }
 
         switch call?.name {
         case "ask_owner":
@@ -233,7 +230,6 @@ struct ModelTaskAgent: TaskAgent {
             next.say(.steward, reply)
             next.state = .needsAnswer(question: reply)
         }
-        return next
     }
 }
 

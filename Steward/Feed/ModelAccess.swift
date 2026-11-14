@@ -2,12 +2,14 @@ import Foundation
 import Security
 import StewardCore
 
-/// The one place the app gets a model for the feed.
+/// The one place the app gets a model, for tasks, the feed and the review.
 ///
-/// Undecided (see the relay plan): the owner never handles a key. The likely
-/// shape is that the relay creates a capped key for this phone and the app
-/// keeps it in the Keychain slot below. Until then, debug runs take the key
-/// from the launch environment, like chat's `-uiState agent`.
+/// The owner never handles a key. In order:
+/// 1. a provisioned key in the Keychain slot below (nothing writes it yet:
+///    the relay may one day create a capped key for each phone),
+/// 2. a debug key from the launch environment, like chat's `-uiState agent`,
+/// 3. the relay's model proxy, with the relay's key and its daily cap, once
+///    this phone has a relay (`CaseService.relayConnection`).
 nonisolated enum ModelAccess {
     struct Setup {
         var key: String
@@ -17,11 +19,23 @@ nonisolated enum ModelAccess {
 
     static let openRouter = URL(string: "https://openrouter.ai/api/v1")!
 
-    /// A model that can search the web, or `nil` when none is set up.
-    static func feedModel() -> (any ModelClient)? {
-        guard let setup = provisioned() ?? debugSetup() else { return nil }
-        return OpenAICompatibleClient(baseURL: setup.baseURL, model: withWebSearch(setup.model, on: setup.baseURL), apiKey: setup.key)
+    /// A model for Steward's own work, or `nil` when none is set up. With
+    /// `searchesWeb`, one that can look things up on the web.
+    @MainActor
+    static func model(searchesWeb: Bool) -> (any ModelClient)? {
+        if let setup = provisioned() ?? debugSetup() {
+            let name = searchesWeb ? withWebSearch(setup.model, on: setup.baseURL) : setup.model
+            return OpenAICompatibleClient(baseURL: setup.baseURL, model: name, apiKey: setup.key)
+        }
+        guard let connection = CaseService.relayConnection else { return nil }
+        // The relay forwards to OpenRouter, which reads the same suffix.
+        let name = searchesWeb && !RelaySettings.model.hasSuffix(":online") ? RelaySettings.model + ":online" : RelaySettings.model
+        return RelayModel(connection: connection, model: name)
     }
+
+    /// The feed's model: it always searches the web.
+    @MainActor
+    static func feedModel() -> (any ModelClient)? { model(searchesWeb: true) }
 
     /// OpenRouter adds web search to any model with the `:online` suffix.
     static func withWebSearch(_ model: String, on baseURL: URL) -> String {

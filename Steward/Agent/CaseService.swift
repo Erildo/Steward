@@ -40,20 +40,35 @@ enum CaseService {
         ? CaseStore(folder: URL.temporaryDirectory.appending(path: "cases-\(launchState ?? "debug")-\(UUID().uuidString)"))
         : CaseStore(folder: URL.documentsDirectory.appending(path: "Cases"))
 
+    /// This phone's one link to the relay, shared by errands, tasks, the feed
+    /// and the review: mail, wakes and the model proxy all go through it.
+    /// `nil` on sample launches, and in release until the relay is deployed.
+    static let relayConnection: RelayConnection? = {
+        switch launchState {
+        case "relay":
+            // Debug: a relay given with `-relayURL`.
+            guard let url = RelaySettings.url else { return nil }
+            let connection = RelayConnection(baseURL: url, invite: RelaySettings.invite)
+            RelayPush.connection = connection
+            return connection
+        case nil, "none":
+            // Release, and `-uiState none`: the live relay once it exists.
+            guard let url = RelaySettings.production else { return nil }
+            let connection = RelayConnection(baseURL: url, invite: nil)
+            RelayPush.connection = connection
+            return connection
+        default:
+            return nil
+        }
+    }()
+
     /// `nil` until a model and real mail are connected: then nothing can act on
     /// a case, and the app says so. Debug launches get a simulated one.
     static let runner: CaseRunner? = {
         switch launchState {
         case "agent": return .simulated()
         case "tasks", "tasksEmpty", "demo": return .tasksSample(store: store)
-        case "relay":
-            // Debug: real mail through a relay given with `-relayURL`.
-            guard let url = RelaySettings.url else { return nil }
-            return .relay(url: url, invite: RelaySettings.invite)
-        default:
-            // Release, and `-uiState none`: live errands once the relay exists.
-            guard let url = RelaySettings.production else { return nil }
-            return .relay(url: url, invite: nil)
+        default: return relayConnection.map { .relay(connection: $0) }
         }
     }()
 }

@@ -389,7 +389,7 @@ struct StewardTabView: View {
 
     private func deleteEverything() {
         model.removeEverything()
-        for item in insights.known { insights.forget(item) }
+        insights.forgetEverything()
         for task in tasks.ownTasks { tasks.delete(task.id) }
         for task in tasks.stewardTasks { tasks.deleteStewardTask(task.id) }
         profile.name = ""

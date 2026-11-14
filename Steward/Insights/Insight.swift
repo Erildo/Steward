@@ -107,7 +107,7 @@ struct Win: Identifiable, Hashable {
 /// One line in "What Steward knows": a fact the owner said, or a guess
 /// Steward made, with where it came from.
 struct Known: Identifiable, Hashable {
-    var id = UUID()
+    var id: UUID
     let text: String
     let source: String
     let isGuess: Bool

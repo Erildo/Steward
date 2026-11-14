@@ -1,0 +1,114 @@
+[
+  {
+    "name": "ask_owner",
+    "description": "Ask the owner one short question and wait for the answer.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string",
+          "description": "The question, in one sentence."
+        }
+      },
+      "required": [
+        "question"
+      ]
+    }
+  },
+  {
+    "name": "finish",
+    "description": "The task is done. Give the owner the full result.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "result": {
+          "type": "string",
+          "description": "The answer, plan, shortlist or draft, ready to use."
+        }
+      },
+      "required": [
+        "result"
+      ]
+    }
+  },
+  {
+    "name": "wait",
+    "description": "Come back to the task after some days.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "note": {
+          "type": "string",
+          "description": "What happens then, in a few words."
+        },
+        "days": {
+          "type": "number",
+          "description": "Days from now."
+        }
+      },
+      "required": [
+        "days",
+        "note"
+      ]
+    }
+  },
+  {
+    "name": "hand_back",
+    "description": "The rest needs the owner. Say why and what to do.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "Why, and the owner's next step."
+        }
+      },
+      "required": [
+        "reason"
+      ]
+    }
+  },
+  {
+    "name": "remember",
+    "description": "Keep something about the owner for later tasks: a preference, a goal, a fact about their life. Use it when it will help next time, not for details of this task. The owner can see and delete everything you keep.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "One short sentence about the owner, in the third person: \"Prefers email to phone calls\"."
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "fact",
+            "guess"
+          ],
+          "description": "fact: the owner just said it. guess: your own reading of what they said or did."
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "sure",
+            "fairly_sure",
+            "hunch"
+          ],
+          "description": "Guesses only: how sure you are."
+        },
+        "evidence": {
+          "type": "string",
+          "description": "Where it comes from, in a few plain words: \"You said so in this task\"."
+        },
+        "topic": {
+          "type": "string",
+          "description": "One of the topics in the first message, if it falls under one. Leave it out otherwise."
+        }
+      },
+      "required": [
+        "text",
+        "kind",
+        "evidence"
+      ]
+    }
+  }
+]

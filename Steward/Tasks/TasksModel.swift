@@ -807,10 +807,10 @@ extension TasksModel {
             try? stewardStore.save(StewardTask.samples() + StewardTask.chatSamples())
         }
         // Sample launches get the scripted stand-in; otherwise a real model
-        // when one is set up (debug key for now), or nothing.
+        // when one is set up (the relay's proxy, or a debug key), or nothing.
         let agent: (any TaskAgent)? = CaseService.isTasksSample || CaseService.isChatSample
             ? SampleTaskAgent()
-            : ModelAccess.feedModel().map { ModelTaskAgent(model: $0) }
+            : ModelAccess.model(searchesWeb: true).map { ModelTaskAgent(model: $0, memory: .shared) }
         let model = TasksModel(store: CaseService.store, taskStore: taskStore, stewardStore: stewardStore,
                                runner: CaseService.runner, agent: agent, isSample: CaseService.isTasksSample)
         model.reload()
