@@ -296,20 +296,98 @@ final class ChatModel {
         guard let runner else { return }
         // Not `runTask`: `begin` cancels that, and starts the run below.
         Task {
-            let file: CaseFile
             do {
                 // With the relay, this also gets the case its own mailbox.
-                file = try await runner.open(SimulatedErrand.gymCancellation())
+                let file = try await runner.open(SimulatedErrand.gymCancellation())
+                run(file, title: SimulatedErrand.title, in: id)
             } catch {
                 say("I couldn't set this errand up, so I haven't started it. Nothing was sent.", in: id)
-                return
             }
-            if !runner.isSimulated { RelayPush.requestPermission() }
-            tasks.setCase(id, file.id)
-            begin(.agentErrand(id: file.id, title: SimulatedErrand.title, label: runner.isSimulated ? "Simulated" : nil), in: id)
-            setStage(0, .active, sync: false)
-            stepsMessageID = say("On it. I'll write to \(file.company.name) and show you the email before anything goes out.", [errand!.stepsBlock], in: id)
-            runTask = Task { await advance(file.id) { try await $0.wake(file.id, with: .start) } }
+        }
+    }
+
+    /// Hands an opened case to the errand agent in this conversation.
+    private func run(_ file: CaseFile, title: String, in id: UUID) {
+        guard let runner else { return }
+        if !runner.isSimulated { RelayPush.requestPermission() }
+        tasks.setCase(id, file.id)
+        begin(.agentErrand(id: file.id, title: title, label: runner.isSimulated ? "Simulated" : nil), in: id)
+        setStage(0, .active, sync: false)
+        stepsMessageID = say("On it. I'll write to \(file.company.name) and show you the email before anything goes out.", [errand!.stepsBlock], in: id)
+        runTask = Task { await advance(file.id) { try await $0.wake(file.id, with: .start) } }
+    }
+
+    /// A task's approved errand: a real case built from what the task found,
+    /// run by the errand agent with its drafts, send-once and proof.
+    func startErrand(_ details: ReplyBlock.Action.Errand, in id: UUID) async -> Result<String, ActionFailure> {
+        guard let runner else { return .failure(.init("Errands need Steward's mail relay, which isn't connected yet.")) }
+        guard errand == nil else { return .failure(.init("I'm already on another errand. Once it's finished or stopped, ask me again.")) }
+        let caseID = UUID()
+        let name = UserDefaults.standard.string(forKey: "owner.name") ?? ""
+        let domain = details.companyEmail.split(separator: "@").last.map(String.init) ?? ""
+        let input = CaseFile(
+            id: caseID,
+            errand: details.errand,
+            createdAt: .now,
+            owner: .init(name: name.isEmpty ? "The account holder" : name,
+                         caseAddress: "case-\(caseID.uuidString.prefix(8).lowercased())@steward.example",
+                         accountRef: details.accountRef, facts: details.facts, goal: details.goal,
+                         willNot: details.willNot),
+            company: .init(name: details.companyName, domain: domain, email: details.companyEmail))
+        do {
+            let file = try await runner.open(input)
+            run(file, title: "\(details.errand.capitalized) with \(details.companyName)", in: id)
+            return .success("Errand started. The first email comes to you for an OK before it goes out.")
+        } catch {
+            return .failure(.init("I couldn't set the errand up, so nothing was sent."))
+        }
+    }
+
+    // MARK: Actions
+
+    /// The proposal in a message, when there is one.
+    func action(_ messageID: UUID, in id: UUID) -> (index: Int, action: ReplyBlock.Action)? {
+        guard let message = tasks.stewardTask(id)?.messages.first(where: { $0.id == messageID }) else { return nil }
+        for (index, block) in message.allBlocks.enumerated() {
+            if case .action(let action) = block { return (index, action) }
+        }
+        return nil
+    }
+
+    /// The owner's yes. The status turns `approved` before anything runs, so
+    /// a second tap (or a second screen) finds nothing pending: done at most once.
+    func approveAction(message messageID: UUID, in id: UUID) {
+        guard let (index, action) = action(messageID, in: id), action.status == .pending else { return }
+        setAction(action.id, .approved, outcome: nil, at: index, message: messageID, in: id)
+        Task {
+            let result: Result<String, ActionFailure>
+            switch action.payload {
+            case .event(let event): result = await ActionPerformer.add(event)
+            case .reminder(let reminder): result = await ActionPerformer.add(reminder)
+            case .errand(let details): result = await startErrand(details, in: id)
+            }
+            switch result {
+            case .success(let outcome): setAction(action.id, .done, outcome: outcome, at: index, message: messageID, in: id)
+            case .failure(let failure): setAction(action.id, .failed, outcome: failure.message, at: index, message: messageID, in: id)
+            }
+            // An errand now runs this conversation; anything else goes back to Steward.
+            if case .errand = action.payload, case .success = result { return }
+            tasks.resume(id)
+        }
+    }
+
+    func declineAction(message messageID: UUID, in id: UUID) {
+        guard let (index, action) = action(messageID, in: id), action.status == .pending else { return }
+        setAction(action.id, .declined, outcome: nil, at: index, message: messageID, in: id)
+        tasks.resume(id)
+    }
+
+    private func setAction(_ actionID: UUID, _ status: ReplyBlock.Action.Status, outcome: String?, at index: Int, message messageID: UUID, in id: UUID) {
+        tasks.editBlock(id, messageID, at: index) { block in
+            guard case .action(var action) = block, action.id == actionID else { return }
+            action.status = status
+            action.outcome = outcome
+            block = .action(action)
         }
     }
 

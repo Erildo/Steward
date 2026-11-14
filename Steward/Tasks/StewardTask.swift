@@ -108,6 +108,8 @@ enum TaskWake: Equatable {
     case message
     /// A date Steward asked to come back on has passed.
     case timer
+    /// The owner answered a proposal (approved, declined), and it ran or failed.
+    case action
 }
 
 /// Works on a task and returns it with Steward's reply and new state.
@@ -171,11 +173,13 @@ struct ModelTaskAgent: TaskAgent {
             }
         }
         if wake == .timer { messages.append(.user("The date you waited for has come. Carry on.")) }
+        if wake == .action { messages.append(.user("The owner answered your proposal; its status is above. Carry on from there.")) }
         // A fact is only something the owner just said (see `TaskLoop`).
         let ownerJustSpoke = wake == .message || (wake == .start && task.messages.last?.author == .owner)
 
         var copy: Memory? = memory?.memory
-        let outcome = try await TaskLoop(model: model).run(messages: messages, memory: &copy, ownerJustSpoke: ownerJustSpoke)
+        let outcome = try await TaskLoop(model: model).run(messages: messages, memory: &copy, ownerJustSpoke: ownerJustSpoke,
+                                                           proposals: ActionAbilities.offered)
         // Only what was added goes back, onto the live memory.
         let kept = outcome.kept.filter { item in
             guard let memory else { return false }
@@ -187,6 +191,10 @@ struct ModelTaskAgent: TaskAgent {
         switch outcome.end {
         case .call(let call, let text):
             finish(&next, call: call, text: text, kept: kept)
+        case .proposal(let action, let text):
+            noteKept(&next, kept)
+            next.say(.steward, text, blocks: [.action(action)])
+            next.state = .needsAnswer(question: action.question)
         case .stuck:
             next.say(.steward, "I kept going round in circles on this one, so I've stopped. Tell me how you'd like to go on.")
             next.state = .handedBack(note: "Steward got stuck", date: .now)
@@ -194,15 +202,18 @@ struct ModelTaskAgent: TaskAgent {
         return next
     }
 
+    /// Show the work: what Steward kept about the owner, before its reply.
+    private func noteKept(_ next: inout StewardTask, _ kept: [String]) {
+        guard !kept.isEmpty else { return }
+        next.say(.steward, "Noted for next time: " + kept.joined(separator: "; ") + ". You can see or forget it in What Steward Knows.")
+    }
+
     /// Ends the turn on the tool that ends it, or on plain words.
     private func finish(_ next: inout StewardTask, call: ToolCall?, text rawText: String?, kept: [String]) {
         let text = rawText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         func argument(_ key: String) -> String { call?.arguments[key]?.string ?? "" }
         let blocks = ReplyBlock.fromModel(call?.arguments["blocks"])
-        // Show the work: what Steward kept about the owner, before its reply.
-        if !kept.isEmpty {
-            next.say(.steward, "Noted for next time: " + kept.joined(separator: "; ") + ". You can see or forget it in What Steward Knows.")
-        }
+        noteKept(&next, kept)
 
         switch call?.name {
         case "ask_owner":
@@ -240,6 +251,22 @@ struct SampleTaskAgent: TaskAgent {
         try await Task.sleep(for: .seconds(1.2))
         var next = task
         switch (task.state, wake) {
+        case (.working, .start) where Self.sampleProposal(for: task.goal) != nil:
+            // Sample: an event or reminder to approve, without a model.
+            let action = Self.sampleProposal(for: task.goal)!
+            next.say(.steward, "Sample: here's what I'd add. Nothing happens until you say yes.", blocks: [.action(action)])
+            next.state = .needsAnswer(question: action.question)
+        case (_, .action):
+            let answered = task.messages.last?.allBlocks.compactMap { block -> ReplyBlock.Action? in
+                if case .action(let a) = block { a } else { nil }
+            }.first
+            let reply = switch answered?.status {
+            case .done: "Done. Anything else for this?"
+            case .failed: "That didn't go through, so nothing was added. Want me to try something else?"
+            default: "No problem, I've left it."
+            }
+            next.say(.steward, reply)
+            next.state = answered?.status == .done ? .done(date: .now, confirmedByOwner: false) : .needsAnswer(question: reply)
         case (.working, .start):
             let question = "Before I start: anything I should know, like a budget, a date or a place?"
             next.say(.steward, question, blocks: [.choices(.init(options: ["No, go ahead", "Keep it cheap", "It's urgent"]))])
@@ -253,6 +280,25 @@ struct SampleTaskAgent: TaskAgent {
             next.say(.steward, "Noted. (Sample reply.)")
         }
         return next
+    }
+
+    /// Sample launches: "remind me…" proposes a reminder, "dinner"/"meet"
+    /// an event tomorrow at 7 pm, so approving can be tried without a model.
+    static func sampleProposal(for goal: String) -> ReplyBlock.Action? {
+        let lower = goal.lowercased()
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: .now)) ?? .now
+        if lower.hasPrefix("remind me") {
+            let title = goal.dropFirst("remind me".count).trimmingCharacters(in: .whitespaces)
+                .replacingOccurrences(of: "to ", with: "", options: .anchored)
+            return .init(payload: .reminder(.init(title: title.isEmpty ? "Sample reminder" : title.prefix(1).uppercased() + title.dropFirst(),
+                                                  due: tomorrow.addingTimeInterval(9 * 3_600), dueHasTime: true, notes: "Sample")))
+        }
+        if lower.contains("dinner") || lower.contains("meet") {
+            let start = tomorrow.addingTimeInterval(19 * 3_600)
+            return .init(payload: .event(.init(title: "Dinner (sample)", start: start, end: start.addingTimeInterval(7_200),
+                                               allDay: false, location: "Café Central", notes: "Sample event from Steward")))
+        }
+        return nil
     }
 
     /// A placeholder answer shaped like the real one would be: a comparison

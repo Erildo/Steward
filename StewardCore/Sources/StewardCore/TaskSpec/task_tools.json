@@ -110,5 +110,115 @@
         "evidence"
       ]
     }
+  },
+  {
+    "name": "propose_event",
+    "description": "Put an event in the owner's calendar. It ends your turn: the owner sees the event and adds it with one tap, or says no. Use it when the plan has a date and time worth blocking.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Short, as it should read in the calendar: \"Dinner with Ana\"."
+        },
+        "start": {
+          "type": "string",
+          "description": "Owner's local time, 2026-11-20T19:00. A date alone, 2026-11-20, makes an all-day event."
+        },
+        "end": {
+          "type": "string",
+          "description": "Same format. Leave it out for an hour (or one day when all-day)."
+        },
+        "location": {
+          "type": "string",
+          "description": "Where, if known."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Anything worth having at hand then: an address, a booking reference, what to bring."
+        }
+      },
+      "required": [
+        "title",
+        "start"
+      ]
+    }
+  },
+  {
+    "name": "propose_reminder",
+    "description": "Add a reminder to the owner's Reminders. It ends your turn: the owner adds it with one tap, or says no. Use it for something only they can do, by a date.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "What to do, as a short instruction: \"Book Sintra palace tickets\"."
+        },
+        "due": {
+          "type": "string",
+          "description": "Owner's local time, 2026-11-20T09:00, or a date alone. Leave it out for no date."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Links or details needed then."
+        }
+      },
+      "required": [
+        "title"
+      ]
+    }
+  },
+  {
+    "name": "propose_errand",
+    "description": "Start an errand with a company: cancelling, getting a refund, disputing a charge or complaining. It ends your turn. Once the owner says yes, an errand agent writes to the company by email, shows every email for approval, follows up, and closes only with the company's written confirmation. Use it when the task needs someone to deal with a company in writing.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "errand": {
+          "type": "string",
+          "enum": [
+            "cancel",
+            "refund",
+            "dispute",
+            "complain",
+            "other"
+          ],
+          "description": "The kind of errand."
+        },
+        "company_name": {
+          "type": "string",
+          "description": "The company, as it calls itself."
+        },
+        "company_email": {
+          "type": "string",
+          "description": "The company's own email address for this. If you don't know it, ask the owner or find it on the company's own website first."
+        },
+        "goal": {
+          "type": "string",
+          "description": "What counts as done, in one sentence: \"Membership cancelled from the next billing date, confirmed in writing, no further payments\"."
+        },
+        "facts": {
+          "type": "string",
+          "description": "What the owner told you that the company needs or that helps: dates, amounts, what happened."
+        },
+        "account_ref": {
+          "type": "string",
+          "description": "The account, member or order number, if the owner gave it."
+        },
+        "will_not": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "What the owner won't accept, like \"a discount instead of cancelling\"."
+        }
+      },
+      "required": [
+        "errand",
+        "company_name",
+        "company_email",
+        "goal"
+      ]
+    }
   }
 ]

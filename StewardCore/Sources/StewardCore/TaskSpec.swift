@@ -32,7 +32,7 @@ public enum TaskSpec {
         tools
             .filter { names?.contains($0.name) ?? true }
             .map { ToolSpec(name: $0.name, description: $0.description,
-                            parameters: finalTools.contains($0.name) ? withBlocks($0.parameters) : $0.parameters) }
+                            parameters: blockTools.contains($0.name) ? withBlocks($0.parameters) : $0.parameters) }
     }
 
     /// How memory is introduced to the model (`memory.json`).
@@ -52,7 +52,11 @@ public enum TaskSpec {
 
     /// Tools that end the turn. Any other tool returns a result and the model
     /// carries on in the same turn.
-    public static let finalTools: Set<String> = ["ask_owner", "finish", "wait", "hand_back"]
+    public static let finalTools: Set<String> = Set(["ask_owner", "finish", "wait", "hand_back"]).union(ActionProposal.tools)
+
+    /// The tools that end a turn with words, which may carry blocks. A
+    /// proposal draws its own card instead.
+    public static var blockTools: Set<String> { finalTools.subtracting(ActionProposal.tools) }
 
     public static let contextTemplate: String = text("task_context.txt")
 

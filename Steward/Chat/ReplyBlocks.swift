@@ -57,6 +57,7 @@ struct ReplyBlockView: View {
         case .proof(let v): ProofTicket(proof: v)
         case .checklist(let v): ChecklistTicket(checklist: v, index: index, context: context)
         case .chart(let v): ChartTicket(chart: v)
+        case .action(let v): ActionTicket(action: v, context: context)
         }
     }
 }
@@ -494,6 +495,157 @@ private struct DraftTicket: View {
                 .foregroundStyle(Palette.ink)
         case .declined:
             Label("You declined it. Nothing went out.", systemImage: "xmark.circle")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Palette.muted)
+        }
+    }
+}
+
+/// Something Steward will do only with the owner's yes: an event, a reminder
+/// or an errand. The values it will use are on the ticket, and the yes is the
+/// button under them.
+private struct ActionTicket: View {
+    let action: ReplyBlock.Action
+    let context: BlockContext
+
+    @Environment(ChatModel.self) private var chat
+
+    private var isLive: Bool { action.status == .pending && !chat.isWorking(in: context.conversationID) }
+
+    private var kind: String {
+        switch action.payload {
+        case .event: "Calendar"
+        case .reminder: "Reminder"
+        case .errand: "Errand"
+        }
+    }
+
+    private var status: String {
+        switch action.status {
+        case .pending: isLive ? "Needs your OK" : "Waiting"
+        case .approved: "On it"
+        case .declined: "Not done"
+        case .done: "Done"
+        case .failed: "Didn't work"
+        }
+    }
+
+    private var title: String {
+        switch action.payload {
+        case .event(let e): e.title
+        case .reminder(let r): r.title
+        case .errand(let e): e.goal
+        }
+    }
+
+    private var rows: [ReplyBlock.Row] {
+        switch action.payload {
+        case .event(let e):
+            var rows = [ReplyBlock.Row(label: "When", value: Self.when(e))]
+            if let location = e.location { rows.append(.init(label: "Where", value: location)) }
+            return rows
+        case .reminder(let r):
+            guard let due = r.due else { return [.init(label: "Due", value: "No date")] }
+            return [.init(label: "Due", value: r.dueHasTime
+                ? due.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute())
+                : due.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))]
+        case .errand(let e):
+            var rows = [ReplyBlock.Row(label: "Company", value: e.companyName),
+                        ReplyBlock.Row(label: "Writes to", value: e.companyEmail)]
+            if !e.accountRef.isEmpty { rows.append(.init(label: "Reference", value: e.accountRef)) }
+            if !e.willNot.isEmpty { rows.append(.init(label: "Won't accept", value: e.willNot.joined(separator: ", "))) }
+            return rows
+        }
+    }
+
+    private var notes: String? {
+        switch action.payload {
+        case .event(let e): e.notes
+        case .reminder(let r): r.notes
+        case .errand: "Every email comes to you first. Nothing goes out without your OK."
+        }
+    }
+
+    private var approveTitle: String {
+        switch action.payload {
+        case .event: "Add to Calendar"
+        case .reminder: "Add Reminder"
+        case .errand: "Start Errand"
+        }
+    }
+
+    static func when(_ e: ReplyBlock.Action.Event) -> String {
+        if e.allDay {
+            let last = e.end.addingTimeInterval(-1)
+            let day = Date.FormatStyle.dateTime.weekday(.abbreviated).day().month(.abbreviated)
+            return Calendar.current.isDate(e.start, inSameDayAs: last)
+                ? "\(e.start.formatted(day)), all day"
+                : "\(e.start.formatted(day)) – \(last.formatted(day))"
+        }
+        let start = e.start.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute())
+        let end = Calendar.current.isDate(e.start, inSameDayAs: e.end)
+            ? e.end.formatted(date: .omitted, time: .shortened)
+            : e.end.formatted(.dateTime.day().month(.abbreviated).hour().minute())
+        return "\(start) – \(end)"
+    }
+
+    var body: some View {
+        Ticket(kind: kind, status: status, needsYou: isLive) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(title)
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(Palette.ink)
+                VStack(spacing: 8) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { _, row in RowView(row: row) }
+                }
+                if let notes {
+                    Text(notes)
+                        .font(.footnote)
+                        .foregroundStyle(Palette.muted)
+                }
+            }
+        } actions: {
+            actions
+        }
+        .sensoryFeedback(.success, trigger: action.status) { _, new in new == .done }
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        switch action.status {
+        case .pending where isLive:
+            VStack(spacing: 8) {
+                Button { chat.approveAction(message: context.messageID, in: context.conversationID) } label: {
+                    Text(approveTitle).font(.body.weight(.semibold)).frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Palette.orange)
+                .foregroundStyle(Palette.onOrange)
+                Button { chat.declineAction(message: context.messageID, in: context.conversationID) } label: {
+                    Text("Not Now").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(Palette.ink)
+            }
+            .controlSize(.large)
+        case .pending:
+            Text("Waits until Steward finishes this step.")
+                .font(.footnote)
+                .foregroundStyle(Palette.muted)
+        case .approved:
+            Label("You said yes. Steward is on it.", systemImage: "hourglass")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Palette.ink)
+        case .done:
+            Label(action.outcome ?? "Done", systemImage: "checkmark.circle.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Palette.ink)
+        case .failed:
+            Label(action.outcome ?? "It didn't work, so nothing was done.", systemImage: "exclamationmark.circle")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Palette.ink)
+        case .declined:
+            Label("You said not now. Nothing was done.", systemImage: "xmark.circle")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Palette.muted)
         }

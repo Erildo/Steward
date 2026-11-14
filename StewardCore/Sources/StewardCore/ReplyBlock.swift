@@ -31,6 +31,8 @@ public enum ReplyBlock: Codable, Sendable, Equatable {
     /// Numbers drawn as a chart, with the part that matters picked out, and
     /// optionally a "what if" the owner can change.
     case chart(Chart)
+    /// Something Steward will do outside the chat only with the owner's yes.
+    case action(Action)
 
     // MARK: Payloads
 
@@ -294,7 +296,7 @@ public enum ReplyBlock: Codable, Sendable, Equatable {
     // MARK: Coding
 
     public enum Kind: String, Codable, Sendable, CaseIterable {
-        case choices, field, steps, deadline, draft, compare, timeline, proof, checklist, chart
+        case choices, field, steps, deadline, draft, compare, timeline, proof, checklist, chart, action
     }
 
     public var kind: Kind {
@@ -309,6 +311,7 @@ public enum ReplyBlock: Codable, Sendable, Equatable {
         case .proof: .proof
         case .checklist: .checklist
         case .chart: .chart
+        case .action: .action
         }
     }
 
@@ -327,6 +330,7 @@ public enum ReplyBlock: Codable, Sendable, Equatable {
         case .proof: self = .proof(try Proof(from: decoder))
         case .checklist: self = .checklist(try Checklist(from: decoder))
         case .chart: self = .chart(try Chart(from: decoder))
+        case .action: self = .action(try Action(from: decoder))
         }
     }
 
@@ -344,6 +348,7 @@ public enum ReplyBlock: Codable, Sendable, Equatable {
         case .proof(let v): try v.encode(to: encoder)
         case .checklist(let v): try v.encode(to: encoder)
         case .chart(let v): try v.encode(to: encoder)
+        case .action(let v): try v.encode(to: encoder)
         }
     }
 }
@@ -461,6 +466,9 @@ extension ReplyBlock {
                 }
             }
             return v.points.count < 2 ? nil : .chart(v)
+        case .action:
+            // Built by `ActionProposal`, already checked.
+            return self
         }
     }
 
@@ -551,6 +559,8 @@ extension ReplyBlock {
         case .chart(let v):
             let values = v.points.map { "\($0.label) \($0.value.formatted(.number.precision(.fractionLength(0...1))))" }
             return "[\(v.title ?? "Chart"), \(v.unit): " + values.joined(separator: "; ") + (v.target.map { "; target \($0)" } ?? "") + "]"
+        case .action(let v):
+            return "[\(v.plainText)]"
         }
     }
 }

@@ -301,6 +301,14 @@ final class TasksModel {
         wake(id, .message)
     }
 
+    /// The owner answered a proposal in this task: Steward carries on from it.
+    func resume(_ id: UUID) {
+        guard var task = stewardTask(id) else { return }
+        task.state = .working
+        replace(task)
+        wake(id, .action)
+    }
+
     /// Wakes the agent, or says plainly that there isn't one yet, so a
     /// conversation never sits on the owner's words with no reply.
     private func wake(_ id: UUID, _ wake: TaskWake) {

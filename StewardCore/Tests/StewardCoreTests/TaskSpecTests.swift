@@ -6,11 +6,11 @@ import Testing
     let specs = TaskSpec.toolSpecs()
     #expect(specs.map(\.name) == TaskSpec.tools.map(\.name))
     #expect(Set(specs.map(\.name)).isSuperset(of: TaskSpec.finalTools))
-    for spec in specs where !TaskSpec.finalTools.contains(spec.name) {
+    for spec in specs where !TaskSpec.blockTools.contains(spec.name) {
         guard case .object(let schema) = spec.parameters, case .object(let properties)? = schema["properties"] else { continue }
         #expect(properties["blocks"] == nil, "\(spec.name) shouldn't take blocks")
     }
-    for spec in specs where TaskSpec.finalTools.contains(spec.name) {
+    for spec in specs where TaskSpec.blockTools.contains(spec.name) {
         guard case .object(let schema) = spec.parameters, case .object(let properties)? = schema["properties"] else {
             Issue.record("\(spec.name) has no properties")
             continue

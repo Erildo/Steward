@@ -24,7 +24,9 @@ struct RootTabView: View {
         let tasks = TasksModel.launch()
         _tasks = State(initialValue: tasks)
         _chat = State(initialValue: ChatModel.launch(tasks: tasks))
-        _steward = State(initialValue: StewardTabModel.launch(tasks: tasks))
+        let steward = StewardTabModel.launch(tasks: tasks)
+        _steward = State(initialValue: steward)
+        ActionAbilities.steward = steward
     }
 
     private func unlock() {

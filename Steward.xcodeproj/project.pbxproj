@@ -413,6 +413,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Steward;
+				INFOPLIST_KEY_NSCalendarsWriteOnlyAccessUsageDescription = "Steward adds the events you approve to your calendar.";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Steward adds the reminders you approve to your Reminders.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Steward uses Face ID to unlock, when you turn the lock on.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";
@@ -443,6 +445,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Steward;
+				INFOPLIST_KEY_NSCalendarsWriteOnlyAccessUsageDescription = "Steward adds the events you approve to your calendar.";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Steward adds the reminders you approve to your Reminders.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Steward uses Face ID to unlock, when you turn the lock on.";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIBackgroundModes = "remote-notification";

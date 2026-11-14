@@ -15,6 +15,8 @@ public struct TaskLoop: Sendable {
         public enum End: Sendable, Equatable {
             /// A tool from `TaskSpec.finalTools`, or nil for plain words.
             case call(ToolCall?, text: String)
+            /// A checked proposal waiting for the owner's yes.
+            case proposal(ReplyBlock.Action, text: String)
             case stuck
         }
         public var end: End
@@ -32,17 +34,20 @@ public struct TaskLoop: Sendable {
         self.maxSteps = maxSteps
     }
 
-    /// The tools offered: the ones that end a turn, plus `remember` when there is memory.
-    public static func tools(withMemory: Bool) -> [ToolSpec] {
-        var names = TaskSpec.finalTools
+    /// The tools offered: the ones that end a turn, `remember` when there is
+    /// memory, and only the proposals this phone allows. A tool that isn't
+    /// allowed is never offered, rather than forbidden in the prompt.
+    public static func tools(withMemory: Bool, proposals: Set<String> = []) -> [ToolSpec] {
+        var names = TaskSpec.finalTools.subtracting(ActionProposal.tools).union(proposals.intersection(ActionProposal.tools))
         if withMemory { names.insert("remember") }
         return TaskSpec.toolSpecs(only: names)
     }
 
-    public func run(messages start: [ModelMessage], memory: inout Memory?, ownerJustSpoke: Bool) async throws -> Outcome {
+    public func run(messages start: [ModelMessage], memory: inout Memory?, ownerJustSpoke: Bool,
+                    proposals: Set<String> = [], now: Date = .now) async throws -> Outcome {
         var messages = start
         var kept: [Memory.Item] = []
-        let tools = Self.tools(withMemory: memory != nil)
+        let tools = Self.tools(withMemory: memory != nil, proposals: proposals)
         for _ in 0..<maxSteps {
             let turn = try await model.complete(system: TaskSpec.system, messages: messages, tools: tools)
             let final = turn.toolCalls.first { TaskSpec.finalTools.contains($0.name) }
@@ -55,8 +60,30 @@ public struct TaskLoop: Sendable {
                 if let note { kept.append(note) }
                 results.append((call.id, result))
             }
+            let text = turn.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            var answered = side
+            if let final, ActionProposal.tools.contains(final.name) {
+                // A proposal the phone doesn't allow, or one that doesn't check
+                // out, goes back to the model to fix instead of to the owner.
+                guard proposals.contains(final.name) else {
+                    answered.append(final)
+                    results.append((final.id, "\(final.name) isn't available on this phone. Tell the owner what to do instead."))
+                    messages.append(.assistant(text: turn.text, toolCalls: answered))
+                    for (id, result) in results { messages.append(.tool(callID: id, content: result)) }
+                    continue
+                }
+                switch ActionProposal.parse(final, now: now) {
+                case .success(let action):
+                    return Outcome(end: .proposal(action, text: text), kept: kept)
+                case .failure(let error):
+                    answered.append(final)
+                    results.append((final.id, "Not proposed: \(error.message)"))
+                    messages.append(.assistant(text: turn.text, toolCalls: answered))
+                    for (id, result) in results { messages.append(.tool(callID: id, content: result)) }
+                    continue
+                }
+            }
             if final != nil || side.isEmpty {
-                let text = turn.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 return Outcome(end: .call(final, text: text), kept: kept)
             }
             messages.append(.assistant(text: turn.text, toolCalls: side))
