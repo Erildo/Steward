@@ -294,18 +294,23 @@ final class ChatModel {
 
     private func startAgentErrand(in id: UUID) {
         guard let runner else { return }
-        let file = SimulatedErrand.gymCancellation()
-        do {
-            try runner.open(file)
-        } catch {
-            say("I couldn't save this errand on your phone, so I haven't started it.", in: id)
-            return
+        // Not `runTask`: `begin` cancels that, and starts the run below.
+        Task {
+            let file: CaseFile
+            do {
+                // With the relay, this also gets the case its own mailbox.
+                file = try await runner.open(SimulatedErrand.gymCancellation())
+            } catch {
+                say("I couldn't set this errand up, so I haven't started it. Nothing was sent.", in: id)
+                return
+            }
+            if !runner.isSimulated { RelayPush.requestPermission() }
+            tasks.setCase(id, file.id)
+            begin(.agentErrand(id: file.id, title: SimulatedErrand.title, label: runner.isSimulated ? "Simulated" : nil), in: id)
+            setStage(0, .active, sync: false)
+            stepsMessageID = say("On it. I'll write to \(file.company.name) and show you the email before anything goes out.", [errand!.stepsBlock], in: id)
+            runTask = Task { await advance(file.id) { try await $0.wake(file.id, with: .start) } }
         }
-        tasks.setCase(id, file.id)
-        begin(.agentErrand(id: file.id, title: SimulatedErrand.title, label: runner.isSimulated ? "Simulated" : nil), in: id)
-        setStage(0, .active, sync: false)
-        stepsMessageID = say("On it. I'll write to \(file.company.name) and show you the email before anything goes out.", [errand!.stepsBlock], in: id)
-        runTask = Task { await advance(file.id) { try await $0.wake(file.id, with: .start) } }
     }
 
     /// Wakes the agent through `work`, then shows where the case now stands.

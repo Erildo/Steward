@@ -2,6 +2,8 @@ import SwiftUI
 
 @main
 struct StewardApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     init() {
         #if DEBUG
         // Debug builds open with every tab's sample data, so a phone run from

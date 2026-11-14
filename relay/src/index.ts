@@ -20,11 +20,22 @@ export interface Env {
   OPENROUTER_API_KEY?: string;
   APNS_KEY?: string;
   REGISTRATION_SECRET?: string;
+  /** Local development only (.dev.vars): log sends instead of mailing. */
+  DEV_LOG_MAIL?: string;
 }
 
 const noMailer: Mailer = {
   async send() {
     throw new Error("RESEND_API_KEY is not set");
+  },
+};
+
+/** For `wrangler dev` only: says what would go out, sends nothing. Only the
+ * addresses and subject are printed, in the developer's own terminal. */
+const devMailer: Mailer = {
+  async send(email) {
+    console.log(`[dev] would send ${email.idempotencyKey}: ${email.from} -> ${email.to}: ${email.subject}`);
+    return `dev-${email.idempotencyKey}`;
   },
 };
 
@@ -41,7 +52,7 @@ export function relayFor(env: Env): Relay {
   const pusher = env.APNS_KEY && env.APNS_KEY_ID && env.APNS_TEAM_ID
     ? new ApnsPusher({ keyPem: env.APNS_KEY, keyId: env.APNS_KEY_ID, teamId: env.APNS_TEAM_ID, topic: env.APNS_TOPIC, sandbox: env.APNS_SANDBOX !== "false" })
     : new NoPusher();
-  const mailer = env.RESEND_API_KEY ? new ResendMailer(env.RESEND_API_KEY) : noMailer;
+  const mailer = env.RESEND_API_KEY ? new ResendMailer(env.RESEND_API_KEY) : env.DEV_LOG_MAIL === "true" ? devMailer : noMailer;
   return new Relay(new D1Store(env.DB), mailer, pusher, config);
 }
 

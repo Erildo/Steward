@@ -9,6 +9,7 @@ struct RootTabView: View {
     @State private var tasks: TasksModel
     /// Chat's engine: routes what the owner writes and runs the errand under way.
     @State private var chat: ChatModel
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         let tasks = TasksModel.launch()
@@ -42,6 +43,11 @@ struct RootTabView: View {
         .environment(tasks)
         .environment(chat)
         .preferredColorScheme(appearance.colorScheme)
+        // Mail and follow-up times that came due while Steward wasn't looking.
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            guard phase == .active, let runner = CaseService.runner else { return }
+            Task { await runner.refresh() }
+        }
     }
 }
 
