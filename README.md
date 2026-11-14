@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/steward-avatar.svg" width="104" height="104" alt="Steward, an orange circle with a cat's head">
+  <img src="assets/steward-avatar.svg" width="104" height="104" alt="Steward, a ginger cat on a cream circle">
 </p>
 
 <h1 align="center">Steward</h1>

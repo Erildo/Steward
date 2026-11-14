@@ -8,12 +8,16 @@ enum Palette {
     static let stewardBubble = dynamic(light: 0xEDEDF0, dark: 0x1C2029)
     /// 5:1 or better on the ground and on Steward's bubbles, in both themes.
     static let muted = dynamic(light: 0x636367, dark: 0xA0A6B4)
-    /// Primary. Only on your words, the current tab, send and the focus ring.
-    static let orange = dynamic(light: 0xF15A29, dark: 0xF15A29)
-    /// Orange for small text and thin strokes. The primary is 3.4:1 on white,
-    /// too faint for words, so light mode deepens it (5.2:1).
-    static let orangeText = dynamic(light: 0xBF4317, dark: 0xF15A29)
+    /// Primary: ginger, the cat's coat. Only on your words, the current tab,
+    /// send and the focus ring. Near-black text on it is 6.2:1.
+    static let orange = dynamic(light: 0xF06E32, dark: 0xF06E32)
+    /// Orange for small text and thin strokes. The primary is 3:1 on white,
+    /// too faint for words, so light mode deepens it (5.7:1 on white, 4.9:1
+    /// on Steward's bubbles).
+    static let orangeText = dynamic(light: 0xB04512, dark: 0xF06E32)
     static let onOrange = dynamic(light: 0x1F0D05, dark: 0x1F0D05)
+    /// Behind the ginger cat: warm cream, never the black-and-orange of Halloween.
+    static let catGround = dynamic(light: 0xF3E8D6, dark: 0x2B2420)
     /// Behind the owner's initials: a step off the grouped rows they sit on.
     static let ownerTint = dynamic(light: 0xD8D8DF, dark: 0x2E3443)
     /// Grouped task rows on the ground.
@@ -84,8 +88,9 @@ enum Appearance: String, CaseIterable, Identifiable {
     }
 }
 
-/// Steward's avatar: a cat. Independent, unbothered by companies, and on your side.
-/// It blinks now and then in the app; widgets pass `blinks: false`.
+/// Steward's avatar: a ginger cat on cream. Independent, unbothered by
+/// companies, and on your side. It blinks now and then in the app; widgets
+/// pass `blinks: false`.
 struct StewardAvatar: View {
     var size: CGFloat = 30
     var blinks = true
@@ -96,12 +101,18 @@ struct StewardAvatar: View {
     @State private var eyeOpen: CGFloat = 1
 
     var body: some View {
-        CatShape(eyeOpen: eyeOpen, small: size < 40)
-            .fill(neutral ? Palette.ground : Palette.onOrange)
+        ZStack {
+            if neutral {
+                CatShape(eyeOpen: eyeOpen, small: size < 40).fill(Palette.ground)
+            } else {
+                CatShape(eyeOpen: 1, small: size < 40, cutsEyes: false).fill(Palette.orange)
+                CatEyes(eyeOpen: eyeOpen, small: size < 40).fill(Palette.onOrange)
+            }
+        }
             .frame(width: size * 0.64, height: size * 0.64)
             .offset(y: size * 0.02)
             .frame(width: size, height: size)
-            .background(neutral ? Palette.ink : Palette.orange, in: .circle)
+            .background(neutral ? Palette.ink : Palette.catGround, in: .circle)
             .accessibilityHidden(true)
             .task(id: blinks && !reduceMotion) {
                 guard blinks, !reduceMotion else { return }
@@ -115,14 +126,16 @@ struct StewardAvatar: View {
     }
 }
 
-/// The cat's head as one shape: ears joined to a round face, with the eyes cut
-/// out so the avatar's orange shows through. One shape means no seams, even
-/// under Liquid Glass, which treats overlapping layers separately.
+/// The cat's head as one shape: ears joined to a round face. The neutral
+/// avatar cuts the eyes out so the ink behind shows through; the ginger one
+/// paints dark eyes on top. One head shape means no seams, even under Liquid
+/// Glass, which treats overlapping layers separately.
 nonisolated private struct CatShape: Shape {
     /// 1 is open, near 0 is a blink.
     var eyeOpen: CGFloat
     /// At pill size, slightly bigger eyes so they stay bright, not a smudge.
     var small: Bool
+    var cutsEyes = true
 
     var animatableData: CGFloat {
         get { eyeOpen }
@@ -148,16 +161,31 @@ nonisolated private struct CatShape: Shape {
             width: rect.width * 0.80, height: rect.height * 0.66
         ))
 
+        let face = ears.union(head)
+        return cutsEyes ? face.subtracting(CatEyes(eyeOpen: eyeOpen, small: small).path(in: rect)) : face
+    }
+}
+
+nonisolated private struct CatEyes: Shape {
+    var eyeOpen: CGFloat
+    var small: Bool
+
+    var animatableData: CGFloat {
+        get { eyeOpen }
+        set { eyeOpen = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
         let eyeW = rect.width * (small ? 0.15 : 0.11)
         let eyeH = max(rect.height * (small ? 0.23 : 0.18) * eyeOpen, 0.6)
         var eyes = Path()
         for x in [0.35, 0.65] {
-            let center = point(x, 0.60)
+            let center = CGPoint(x: rect.minX + rect.width * x, y: rect.minY + rect.height * 0.60)
             eyes.addRoundedRect(
                 in: CGRect(x: center.x - eyeW / 2, y: center.y - eyeH / 2, width: eyeW, height: eyeH),
                 cornerSize: CGSize(width: eyeW / 2, height: min(eyeW, eyeH) / 2)
             )
         }
-        return ears.union(head).subtracting(eyes)
+        return eyes
     }
 }
