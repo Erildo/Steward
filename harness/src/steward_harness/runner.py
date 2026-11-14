@@ -3,6 +3,8 @@
     uv run stage0 status            which arms are stale, and why
     uv run stage0 run               re-test every stale arm, then update results/
     uv run stage0 run --arm NAME    one arm only (add --force to re-test a fresh arm)
+    uv run stage0 full              every scenario for every arm, resuming each day
+                                    until done (add --dry-run to see progress)
     uv run stage0 import LOG...     record existing eval logs as an exploratory run
     uv run stage0 report            rebuild results/RESULTS.md from results/runs/
 
@@ -169,10 +171,6 @@ def summarise(logs: list[Any], arm_name: str, fp: str, exploratory: bool) -> dic
                 }
             )
 
-    def avg(key: str) -> float | None:
-        vals = [r[key] for r in rows if r.get(key) is not None]
-        return round(mean(vals), 3) if vals else None
-
     roles = {k: v.model for k, v in (first.eval.model_roles or {}).items()}
     meta = first.eval.metadata or {}
     rev = first.eval.revision
@@ -198,9 +196,17 @@ def summarise(logs: list[Any], arm_name: str, fp: str, exploratory: bool) -> dic
             "uncommitted_changes": rev.dirty if rev else None,
             "inspect_ai": (first.eval.packages or {}).get("inspect_ai"),
         },
-        "summary": {"runs": len(rows), **{k: avg(k) for k in METRICS}, "tokens_per_run": avg("tokens")},
+        "summary": summary_of(rows),
         "scenarios": sorted(rows, key=lambda r: (r.get("errand") or "", r["scenario"], r["epoch"])),
     }
+
+
+def summary_of(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    def avg(key: str) -> float | None:
+        vals = [r[key] for r in rows if r.get(key) is not None]
+        return round(mean(vals), 3) if vals else None
+
+    return {"runs": len(rows), **{k: avg(k) for k in METRICS}, "tokens_per_run": avg("tokens")}
 
 
 def save_run(run: dict[str, Any]) -> str:
@@ -212,6 +218,171 @@ def save_run(run: dict[str, Any]) -> str:
     latest[run["arm"]] = name
     LATEST.write_text(json.dumps(dict(sorted(latest.items())), indent=2) + "\n")
     return name
+
+
+# ---------- the full set, a few scenarios at a time ----------
+#
+# The smoke set in arms.yaml fits a free day's quota; every scenario doesn't.
+# `stage0 full` runs each arm over every scenario, one scenario at a time, and
+# keeps each finished scenario in results/full/<arm>_<fingerprint>.json. When the
+# quota runs out it stops, and the next day picks up where it left off. A change
+# to the code, scenarios or playbooks gives a new fingerprint and a fresh start.
+
+FULL = RESULTS / "full"
+
+# Run first: the scenarios that tempt a premature "done" (the reviewer question),
+# then the errands Stage 0 has never measured, then the rest of cancel.
+FULL_FIRST = ["gb-broadband-acknowledged", "de-gym-paused-not-cancelled", "gb-retail-refund-approved",
+              "ie-mobile-partial-credit"]
+FULL_ERRAND_ORDER = ["refund", "dispute", "complain", "cancel"]
+
+
+def full_arm(arm: dict[str, Any]) -> dict[str, Any]:
+    """The arm over every scenario, once each."""
+    return {**arm, "scenarios": None, "epochs": 1}
+
+
+def all_scenarios(errands: list[str]) -> list[tuple[str, str]]:
+    """(errand, scenario id) for every scenario, in the order the full set runs them."""
+    from steward_harness.task import errand_ids
+
+    pairs = [(e, s) for e in sorted(errands, key=lambda e: (FULL_ERRAND_ORDER + [e]).index(e))
+             for s in errand_ids(e)]
+    first = [p for sid in FULL_FIRST for p in pairs if p[1] == sid]
+    return first + [p for p in pairs if p not in first]
+
+
+def ERRANDS_ALL() -> list[str]:  # noqa: N802 - reads like the constant it wraps
+    from steward_harness.task import ERRANDS
+
+    return list(ERRANDS)
+
+
+def full_path(arm_name: str, fp: str) -> Path:
+    return FULL / f"{arm_name}_{fp}.json"
+
+
+def load_full(arm: dict[str, Any]) -> dict[str, Any]:
+    fa = full_arm(arm)
+    fp = fingerprint(fa)
+    path = full_path(arm["name"], fp)
+    if path.exists():
+        return json.loads(path.read_text())
+    return {"arm": arm["name"], "fingerprint": fp, "created": None, "updated": None, "config": None,
+            "code": None, "scenarios": []}
+
+
+def save_full(progress: dict[str, Any]) -> None:
+    FULL.mkdir(parents=True, exist_ok=True)
+    progress["summary"] = summary_of(progress["scenarios"])
+    path = full_path(progress["arm"], progress["fingerprint"])
+    path.write_text(json.dumps(progress, indent=2) + "\n")
+
+
+def full_plan(arms: list[dict[str, Any]]) -> list[tuple[dict[str, Any], str, str]]:
+    """What is left: (arm, errand, scenario), scenario by scenario across the arms,
+    so on any day every arm has been measured on the same scenarios."""
+    done = {a["name"]: {r["scenario"] for r in load_full(a)["scenarios"]} for a in arms}
+    order: list[tuple[str, str]] = []
+    for a in arms:
+        for pair in all_scenarios(a["errands"]):
+            if pair not in order:
+                order.append(pair)
+    return [(a, errand, sid) for errand, sid in order for a in arms
+            if errand in a["errands"] and sid not in done[a["name"]]]
+
+
+def cmd_full(args: argparse.Namespace) -> int:
+    from inspect_ai import eval as inspect_eval
+
+    from steward_harness.task import errand_task
+
+    arms = [a for a in load_arms() if not args.arm or a["name"] in args.arm]
+    if args.arm and len(arms) != len(args.arm):
+        print(f"Unknown arm in {args.arm}", file=sys.stderr)
+        return 2
+
+    plan = full_plan(arms)
+    total = sum(len(all_scenarios(a["errands"])) for a in arms)
+    print(f"Full set: {total - len(plan)} of {total} scenario runs recorded, {len(plan)} left.")
+    if args.limit is not None:
+        plan = plan[: args.limit]
+    for arm, errand, sid in plan[:10] if args.dry_run else []:
+        print(f"  next: {arm['name']} · {errand} · {sid}")
+    if args.dry_run or not plan:
+        return 0
+
+    models = sorted({m for a, _, _ in plan for m in (a["model"], a["company"], a.get("owner"), a.get("reviewer")) if m})
+    problem = preflight(models)
+    if problem:
+        kind = "quota or rate limit" if _is_quota(problem) else "model check failed"
+        print(f"Not starting: {kind}.\n{problem[:600]}", file=sys.stderr)
+        return QUOTA_EXIT if _is_quota(problem) else 1
+
+    failed = False
+    for arm, errand, sid in plan:
+        fa = full_arm(arm)
+        roles = {"company": arm["company"]}
+        if arm.get("owner"):
+            roles["owner"] = arm["owner"]
+        if arm.get("reviewer"):
+            roles["reviewer"] = arm["reviewer"]
+        print(f"{arm['name']}: {errand} · {sid}")
+        logs = inspect_eval(
+            errand_task(errand, playbooks=bool(arm["playbooks"]), scenario=[sid],
+                        context=arm["context"], review=bool(arm.get("reviewer"))),
+            model=arm["model"],
+            model_roles=roles,
+            epochs=1,
+            max_retries=arm["max_retries"],
+            timeout=arm["request_timeout"],
+            time_limit=arm["sample_time_limit"],
+            log_dir=str(LOG_DIR),
+            metadata={"stage0_arm": arm["name"], "stage0_fingerprint": fingerprint(fa), "stage0_set": "full"},
+            display=args.display,
+        )
+        run = summarise(logs, arm["name"], fingerprint(fa), exploratory=False)
+        if run["status"] != "success":
+            message = " ".join(run["errors"])
+            if _is_quota(message):
+                print(f"Stopped: quota ran out during {sid}. Nothing recorded for it; it runs first next time.",
+                      file=sys.stderr)
+                write_report()
+                return QUOTA_EXIT
+            # Anything else (a timeout, a provider error) is retried next time.
+            print(f"  error, not recorded: {message[:300]}", file=sys.stderr)
+            failed = True
+            continue
+        progress = load_full(arm)
+        progress["created"] = progress["created"] or run["created"]
+        progress["updated"] = run["created"]
+        progress["config"] = run["config"]
+        progress["code"] = run["code"]
+        progress["scenarios"].extend(run["scenarios"])
+        save_full(progress)
+        r = run["scenarios"][0]
+        print(f"  done {r['done']}, false done {r['false_claim']}, near misses {r['near_misses']}, "
+              f"{r['emails_sent']} emails, {r['tokens']} tokens")
+
+    write_report()
+    return 1 if failed else 0
+
+
+def full_results() -> dict[str, tuple[dict[str, Any], int, bool]]:
+    """Per arm in arms.yaml: its full-set progress, how many scenarios it covers,
+    and whether that progress matches the current code (else it's from before a change)."""
+    out = {}
+    for arm in load_arms():
+        total = len(all_scenarios(arm["errands"]))
+        progress = load_full(arm)
+        current = True
+        if not progress["scenarios"]:
+            older = sorted(FULL.glob(f"{arm['name']}_*.json"), key=lambda p: p.stat().st_mtime) if FULL.exists() else []
+            if not older:
+                continue
+            progress, current = json.loads(older[-1].read_text()), False
+        out[arm["name"]] = (progress, total, current)
+    return out
 
 
 # ---------- the readable table ----------
@@ -309,6 +480,42 @@ def write_report() -> None:
                     f"{_num(mean(r['days'] for r in rs))} days{flags}"
                 )
             out.append(f"| {sc} | " + " | ".join(cells) + " |")
+
+    full = full_results()
+    if full:
+        out += ["", "## Full set (every scenario, once each)", "",
+                "Built a few scenarios a day within the free quota by `uv run stage0 full`. "
+                "Until an arm covers every scenario, its numbers are partial: compare arms only on the scenarios they share.",
+                "",
+                "| Arm | Scenarios | Done | Earned | False \"done\" | Near misses | Reviewer said not yet | Days | Emails | Owner questions | Tokens per run | Since | Status |",
+                "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+        for arm_name, (progress, total, current) in full.items():
+            s = summary_of(progress["scenarios"])
+            have = len({r["scenario"] for r in progress["scenarios"]})
+            status = ("complete" if have >= total else "in progress") if current else "out of date (code changed)"
+            out.append(
+                f"| {arm_name} | {have}/{total} | {_pct(s['done'])} | {_pct(s.get('earned'))} | {_pct(s['false_claim'])} "
+                f"| {_num(s['near_misses'], 2)} | {_num(s.get('review_rejections'), 2)} | {_num(s['days'])} "
+                f"| {_num(s['emails_sent'])} | {_num(s['owner_questions'])} | {_num(s['tokens_per_run'], 0)} "
+                f"| {(progress['created'] or '–')[:10]} | {status} |"
+            )
+        names = list(full)
+        rows_by = {n: {r["scenario"]: r for r in full[n][0]["scenarios"]} for n in names}
+        order = [sid for _, sid in all_scenarios(ERRANDS_ALL())]
+        out += ["", "| Scenario | " + " | ".join(names) + " |", "|---|" + "---|" * len(names)]
+        for sid in order:
+            cells = []
+            for n in names:
+                r = rows_by[n].get(sid)
+                if r is None:
+                    cells.append("–")
+                    continue
+                flags = " ⚠ false done" if r["false_claim"] else ""
+                flags += " ⚠ lucky" if r.get("lucky") else ""
+                flags += " ⚠ near miss" if r["near_misses"] else ""
+                cells.append(f"{'done' if r['done'] else 'not done'} · {_num(r['emails_sent'])} emails · "
+                             f"{_num(r['days'])} days{flags}")
+            out.append(f"| {sid} | " + " | ".join(cells) + " |")
 
     out += ["", "## What the columns mean", "",
             "- **Done**: the company confirmed in writing and Steward closed the case as done.",
@@ -495,6 +702,13 @@ def main() -> None:
     run.add_argument("--dry-run", action="store_true", help="show what would run")
     run.add_argument("--display", default="plain", help="Inspect display: plain, rich, none")
     run.set_defaults(func=cmd_run)
+
+    full = sub.add_parser("full", help="every scenario, a few at a time, resuming where the last run stopped")
+    full.add_argument("--arm", action="append", help="arm name from arms.yaml (repeatable)")
+    full.add_argument("--limit", type=int, help="at most this many scenario runs now")
+    full.add_argument("--dry-run", action="store_true", help="show progress and what runs next")
+    full.add_argument("--display", default="plain", help="Inspect display: plain, rich, none")
+    full.set_defaults(func=cmd_full)
 
     imp = sub.add_parser("import")
     imp.add_argument("logs", nargs="+")

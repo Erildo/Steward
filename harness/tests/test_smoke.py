@@ -312,6 +312,35 @@ def test_summary_counts_a_confirmed_run():
     assert run["scenarios"][0]["closed_as"] == "done"
 
 
+def test_full_set_resumes_where_it_stopped(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "RESULTS", tmp_path)
+    monkeypatch.setattr(runner, "RUNS", tmp_path / "runs")
+    monkeypatch.setattr(runner, "LATEST", tmp_path / "latest.json")
+    monkeypatch.setattr(runner, "FULL", tmp_path / "full")
+    arms = runner.load_arms()[:2]
+    total = len(runner.all_scenarios(arms[0]["errands"]))
+    plan = runner.full_plan(arms)
+    assert len(plan) == total * 2
+    # Scenario by scenario across arms, the premature-"done" ones first.
+    assert [p[2] for p in plan[:2]] == [runner.FULL_FIRST[0]] * 2
+    assert {p[0]["name"] for p in plan[:2]} == {a["name"] for a in arms}
+
+    row = {"errand": plan[0][1], "scenario": plan[0][2], "epoch": 1, **{k: 0 for k in runner.METRICS},
+           "done": 1, "tokens": 100}
+    progress = runner.load_full(arms[0])
+    progress |= {"created": "2026-11-14T10:00:00", "updated": "2026-11-14T10:00:00", "scenarios": [row]}
+    runner.save_full(progress)
+
+    plan = runner.full_plan(arms)
+    assert len(plan) == total * 2 - 1
+    assert (plan[0][0]["name"], plan[0][2]) == (arms[1]["name"], runner.FULL_FIRST[0])
+
+    runner.write_report()
+    report = (tmp_path / "RESULTS.md").read_text()
+    assert f"| {arms[0]['name']} | 1/{total} | 100%" in report
+    assert "in progress" in report
+
+
 # ---------- scenario and playbook files ----------
 
 import yaml  # noqa: E402
