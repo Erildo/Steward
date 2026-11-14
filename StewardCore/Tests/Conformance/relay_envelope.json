@@ -1,0 +1,23 @@
+{
+  "note": "Written by relay/test/write-fixture.ts. The private key is a throwaway test key.",
+  "privateKey": "IGTFjOi1p2UKpRwHCleTV0KxavsIBY+tp6W+becFk3U=",
+  "publicKey": "vVxpwaYVgKlr1PcXrfvyCcXAuQL+sozgUfH1xu3guBU=",
+  "envelope": {
+    "v": 1,
+    "alg": "X25519-HKDF-SHA256-AES256GCM",
+    "epk": "ZxVlg0zCnXUheW9KtJQ7YxwsPnaUzqK3/24zpw7DrCY=",
+    "nonce": "6ZmlG/TehLiHWSUa",
+    "ct": "tmCZRvYhbP+SX60e13DY4+R1KPHXZGZus4nd/szqBAkkaRiw6UvBVoWh9tLt/Mh4/yg6LbiUM5Vcc0zKTIoOP3zOw3UbGW+9bW49MktyFseLzWxCacebgIPcCP5AwoBBQApA0hleZfW20EneG+NEKGG+Lz4QX69rfWee4+MVcQpNJi0ILu7EUx43qfZ5u1CS8EkbQxlAgpxbn+NTIX3jwSFVWjdl+8vgkQf8kFKgrrL3KP7MdmucVMcUU8aGjPuGd8RaDjlkD5ayNaGYFMHG5u2+wTQrLqITdo0Yf2jKIUVSopFSlivjZVDnbOelVQSTg9hw96tkWHnOGWiDr6jzVjPxVdP77onbSWbGXrnR3kRtbhXUMODJZFlOKwbK0qtwOOmcG95vgpoiKDgjBm2uCY+axNbLKi4FCnblFHWtdIBporh/HFvNIxG7TfeUMsIc2rWeVfCMbTxqTpfQxL/VqkCe6mODPwj56nMZmjSyBNV9+ADYymlg8oVisz94wLQQAJNXkiQbemfc/twEGbRuQ9FpNy9Ds4TKTUZQ3rllVgtBXmtK0hWkKCZjWruCqKG796sHTDpUyxmdlaPYUv+NMhopRzeXk9yC6iwzJUEBjnOctelXlVqAPcIMuZiPZbjtJwkpZp0yE73wH+pJxckmax0Olwej5xQyRd5oHMLhDcvaJPTGbtbGEnRzGFEp/za5oSZgaDCU1s7Q50vYgk/Vf22SPVv07RyFKMV3euVfwuu4fnynkL0ULhCOLqQOhOP7/DmbkLLJlmfa+VApMts6g3W+JAAM1G/luPVWWTujaplrO4CJWPuimhoDK1N88i5bjMTz16TlNfUkgCDJkb1YNr2I3BcUvlGg62Bz+o9yokJPmG/40BjWGvQsjYGIEJpQaR+3ayWwPByOg2RO5sfRJpTZLRvB81QqfOSOh+ZIwAfExyy5Xc7AxW9pYC0Y4DlgvFKqvLifTEpb5vNBfMzopewq1FlTngpkMY229fGKlCMngEoJOXA0Rr9rYlwETYA4DB6KX1V408kpFq3xfY8DChpUgkFjXag6P3aphpSVhpIDO47UPCboNHxz5bE+0lYolRYTi/CAmw4ez/ZXSbaX2UZH/FLGB4914zKBpmpW5v3wJq2lpETD2OMZ98YfXwGnFmhC2I/HNgl9X6VqOIHsVkIMgE1LPJY7vlSlmSvy+6ZJFz/cTxrFYh8hTZa16allaX0Ch7ZJ7x5sPERMqjsn/k1AiCgIbSvavX0PIWPNa53hFf9OmUOducMJ3/MiT/wrBw+FYWKr9ZIcZ8PXF5QKpxP46ZrCd2DEbvCECxe7KUBni4/nQNmQzZ5GqGyNPvQ4XDsPb5m3ytBFf/cjeok1+dttfFAp88l+2n5uEZMf5ehRJOxADHyJ348yn2BrhaxsgcCAYW7xndU4iRw36G16mpvoClgIAUW5I0YfpessW96ALMFx71Xh6t91Gi+m2eV58kJCAZQKb2RlAGASI8KEM3TaKEEf8OgJBey32wY999OJ+eDTglDDfnPe2IjVtKQ6zSaeE6MsF9z7cShTYGjZFD6efr3v3tcGidGmxFc="
+  },
+  "expect": {
+    "caseId": "Qk3xv9Lr2mT8wPa1",
+    "receivedAt": "2026-11-12T08:30:05.000Z",
+    "dkimPass": [
+      "fitwerk.example"
+    ],
+    "from": "kundenservice@fitwerk.example",
+    "subject": "Re: Kündigung 448120",
+    "date": "2026-11-12T08:30:00Z",
+    "body": "Sehr geehrte Frau Hoffmann,\n\nwir bestätigen die Kündigung zum 10.12.2026. Ein sehr langer Satz, der hier umbricht."
+  }
+}

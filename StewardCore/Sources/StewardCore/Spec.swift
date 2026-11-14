@@ -23,6 +23,7 @@ enum Spec {
             var privateDetail: String
             var evidenceMissing: String
             var evidenceUnmatched: String
+            var evidenceUnsigned: String
             var reviewRejected: String
             var notesSaved: String
             var notesCut: String

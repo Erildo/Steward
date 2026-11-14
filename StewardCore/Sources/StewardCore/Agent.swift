@@ -1,11 +1,11 @@
 import Foundation
 
 /// Sends an email the owner approved. In the app, the relay does this from the
-/// case's own address; in tests, a recorder. `email.sendID` is stable across
-/// retries of the same approval, so a sender that has already sent that ID
-/// must return without sending again.
+/// case's own address (`RelayMailer`); in tests, a recorder. `email.sendID` is
+/// stable across retries of the same approval, so a sender that has already
+/// sent that ID must return without sending again.
 public protocol MailSender: Sendable {
-    func send(_ email: CaseFile.Email, caseID: UUID) async throws
+    func send(_ email: CaseFile.Email, in file: CaseFile) async throws
 }
 
 /// Why the agent is being woken.
@@ -125,7 +125,7 @@ public struct Agent: Sendable {
                     email.draftBody = draft.body
                 }
                 do {
-                    try await mail.send(email, caseID: file.id)
+                    try await mail.send(email, in: file)
                 } catch {
                     var kept = draft
                     kept.sendID = email.sendID

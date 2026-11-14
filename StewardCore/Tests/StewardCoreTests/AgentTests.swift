@@ -6,7 +6,7 @@ import Testing
 
 actor SentMail: MailSender {
     private(set) var sent: [CaseFile.Email] = []
-    func send(_ email: CaseFile.Email, caseID: UUID) async throws { sent.append(email) }
+    func send(_ email: CaseFile.Email, in file: CaseFile) async throws { sent.append(email) }
 }
 
 final class Clock: @unchecked Sendable {

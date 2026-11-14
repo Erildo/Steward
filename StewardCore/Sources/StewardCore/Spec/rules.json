@@ -8,6 +8,7 @@
     "private_detail": "The email contains a private detail the owner never shares by email.",
     "evidence_missing": "for \"done\", quote the company's written confirmation as evidence. Quote it word for word, or close with another status.",
     "evidence_unmatched": "the evidence doesn't match any email from the company. Quote its confirmation word for word, or close with another status.",
+    "evidence_unsigned": "the email with that confirmation wasn't signed by {domain}, so it can't prove anything. Ask the company to confirm from its own address, or close with another status.",
     "review_rejected": "a reviewer read the case and doesn't think it is done yet: {reason} Keep working, or close with another status.",
     "notes_saved": "Notes saved.",
     "notes_cut": "Notes saved, cut to the first {words} words."

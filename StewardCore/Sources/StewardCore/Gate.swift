@@ -35,12 +35,20 @@ public enum Gate {
         guard fragments.reduce(0, { $0 + $1.count }) >= Spec.rules.minimumEvidence else {
             return Spec.rules.messages.evidenceMissing
         }
-        let quoted = file.emails.contains { email in
+        let quoting = file.emails.filter { email in
             guard email.direction == .incoming else { return false }
             let text = letters(email.subject + "\n" + email.body)
             return fragments.allSatisfy(text.contains)
         }
-        return quoted ? nil : Spec.rules.messages.evidenceUnmatched
+        guard !quoting.isEmpty else { return Spec.rules.messages.evidenceUnmatched }
+        // Through the relay, the company's own domain must have signed the
+        // email, so a forged "we confirm" can't close a case. Mail with no
+        // verdict (simulations, the harness) isn't held to this.
+        let domain = file.company.domain
+        guard quoting.contains(where: { $0.dkimPass == nil || $0.isSigned(by: domain) }) else {
+            return Spec.render(Spec.rules.messages.evidenceUnsigned, ["domain": domain])
+        }
+        return nil
     }
 
     /// Lowercased letters and digits only.

@@ -42,6 +42,10 @@ public struct CaseFile: Codable, Identifiable, Sendable, Equatable {
     /// result for themselves, such as after the next bill.
     public var outcomeCheck: OutcomeCheck?
 
+    /// The case's id at the relay, which also owns `owner.caseAddress`.
+    /// `nil` for cases that never touch the relay (samples, simulations).
+    public var relayCaseID: String?
+
     public init(
         id: UUID = UUID(),
         errand: String,
@@ -112,8 +116,13 @@ public struct CaseFile: Codable, Identifiable, Sendable, Equatable {
         /// an ID it has already sent. A draft that carries one is "sending";
         /// once it is in `emails`, it is "sent".
         public var sendID: String?
+        /// For an incoming email through the relay: the domains whose DKIM
+        /// signature our receiving server saw pass. `nil` when unknown, as for
+        /// simulated mail. A quote from an email the company's domain didn't
+        /// sign can't close a case as done (ADR 0002, decision 3).
+        public var dkimPass: [String]?
 
-        public init(direction: Direction, date: Date, from: String, to: String, subject: String, body: String, draftBody: String? = nil, sendID: String? = nil) {
+        public init(direction: Direction, date: Date, from: String, to: String, subject: String, body: String, draftBody: String? = nil, sendID: String? = nil, dkimPass: [String]? = nil) {
             self.direction = direction
             self.date = date
             self.from = from
@@ -122,6 +131,14 @@ public struct CaseFile: Codable, Identifiable, Sendable, Equatable {
             self.body = body
             self.draftBody = draftBody
             self.sendID = sendID
+            self.dkimPass = dkimPass
+        }
+
+        /// True when the company's domain, or a subdomain of it, signed the
+        /// email. A parent domain doesn't count. Mirrors `signedBy` in the relay.
+        public func isSigned(by domain: String) -> Bool {
+            let want = domain.lowercased()
+            return (dkimPass ?? []).contains { $0 == want || $0.hasSuffix("." + want) }
         }
     }
 
@@ -210,7 +227,7 @@ public struct CaseFile: Codable, Identifiable, Sendable, Equatable {
     // the first format is optional when read.
     private enum CodingKeys: String, CodingKey {
         case id, errand, createdAt, owner, company, playbook, emails, events, inbox, transcript, state, closure
-        case standingInstructions, notes, proof, outcomeCheck
+        case standingInstructions, notes, proof, outcomeCheck, relayCaseID
     }
 
     public init(from decoder: Decoder) throws {
@@ -231,5 +248,6 @@ public struct CaseFile: Codable, Identifiable, Sendable, Equatable {
         notes = try c.decodeIfPresent(String.self, forKey: .notes) ?? ""
         proof = try c.decodeIfPresent(Proof.self, forKey: .proof) ?? .none
         outcomeCheck = try c.decodeIfPresent(OutcomeCheck.self, forKey: .outcomeCheck)
+        relayCaseID = try c.decodeIfPresent(String.self, forKey: .relayCaseID)
     }
 }

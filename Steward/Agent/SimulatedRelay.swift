@@ -12,10 +12,10 @@ actor SimulatedMailbox: MailSender {
         self.reply = reply
     }
 
-    func send(_ email: CaseFile.Email, caseID: UUID) async throws {
+    func send(_ email: CaseFile.Email, in file: CaseFile) async throws {
         sent.append(email)
         if let answer = reply(email) {
-            replies[caseID, default: []].append(answer)
+            replies[file.id, default: []].append(answer)
         }
     }
 

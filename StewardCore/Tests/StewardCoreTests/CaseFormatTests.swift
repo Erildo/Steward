@@ -30,7 +30,7 @@ actor FlakyMail: MailSender {
     private(set) var attempts: [String?] = []
     private(set) var sent: [CaseFile.Email] = []
     init(failures: Int) { self.failures = failures }
-    func send(_ email: CaseFile.Email, caseID: UUID) async throws {
+    func send(_ email: CaseFile.Email, in file: CaseFile) async throws {
         attempts.append(email.sendID)
         if failures > 0 { failures -= 1; throw Down() }
         sent.append(email)

@@ -1,0 +1,34 @@
+# Steward's blind relay. Built and tested locally first; nothing is deployed.
+# Before deploying: buy the mail domain, set MAIL_DOMAIN, create the D1
+# database and put its id below, route the domain's email to this Worker
+# (Email Routing, catch-all), verify the domain at Resend, and set the secrets:
+#   wrangler secret put RESEND_API_KEY
+#   wrangler secret put OPENROUTER_API_KEY
+#   wrangler secret put APNS_KEY        (the .p8 file's contents)
+name = "steward-relay"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+
+[vars]
+MAIL_DOMAIN = "relay.steward.example"
+# Only an Authentication-Results header from this server counts as a DKIM
+# verdict. Check it against a real message routed through Cloudflare before
+# relying on it (docs/adr/0002, decision 3).
+TRUSTED_AUTHSERV_ID = "mx.cloudflare.net"
+MODEL_BASE_URL = "https://openrouter.ai/api/v1"
+# Empty means any model; otherwise a comma-separated list.
+MODEL_ALLOW = ""
+MODEL_DAILY_REQUESTS = "300"
+APNS_TOPIC = "esh.steward"
+APNS_KEY_ID = ""
+APNS_TEAM_ID = ""
+APNS_SANDBOX = "true"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "steward-relay"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[triggers]
+crons = ["* * * * *"]

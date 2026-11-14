@@ -23,3 +23,8 @@ build/
 # Swift package build output
 .build/
 .swiftpm/
+
+# Relay (Cloudflare Worker): dependencies, local D1 and dev state
+relay/node_modules/
+relay/.wrangler/
+relay/.dev.vars

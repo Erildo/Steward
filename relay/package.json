@@ -1,0 +1,21 @@
+{
+  "name": "steward-relay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Steward's blind relay: case mailboxes, encrypted inbound mail, approved sends, wakes and the model proxy. See docs/adr/0001 and 0002.",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:local": "wrangler d1 migrations apply steward-relay --local",
+    "fixture": "node --experimental-strip-types test/write-fixture.ts"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261114.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7",
+    "wrangler": "^4.162.0"
+  }
+}
