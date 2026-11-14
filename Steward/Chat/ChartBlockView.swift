@@ -171,7 +171,8 @@ private struct TrendChart: View {
                 RuleMark(y: .value("Target", target))
                     .foregroundStyle(Palette.muted)
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                    .annotation(position: .top, alignment: .leading, spacing: 2) {
+                    // On whichever end the series is far from, so no line runs through it.
+                    .annotation(position: .top, alignment: targetLabelTrailing ? .trailing : .leading, spacing: 2) {
                         Text("Target \(chartNumber(target)) \(unit)")
                             .font(.caption)
                             .foregroundStyle(Palette.muted)
@@ -203,9 +204,9 @@ private struct TrendChart: View {
                 PointMark(x: .value("Time", lastIndex), y: .value(unit, drawn ? last.value : 0))
                     .symbolSize(80)
                     .foregroundStyle(Palette.orange)
-                    // Above and to the left: clear of the line that led here and
-                    // of the projection ahead; below if the target line is close.
-                    .annotation(position: nearTarget ? .bottomLeading : .topLeading, spacing: 4) {
+                    // Placed on the open side of the line that led here, and below
+                    // when the target line is close, so it never sits on a line.
+                    .annotation(position: labelBelow ? .bottomLeading : .topLeading, spacing: 4) {
                         Text("\(chartNumber(last.value)) \(unit)")
                             .font(.caption.weight(.bold).monospacedDigit())
                             .foregroundStyle(Palette.ink)
@@ -235,9 +236,19 @@ private struct TrendChart: View {
         .frame(height: height)
     }
 
-    private var nearTarget: Bool {
-        guard let target, let last = points.last?.value else { return false }
-        return abs(target - last) < top * 0.15
+    private var targetLabelTrailing: Bool {
+        guard let target, let first = points.first?.value else { return false }
+        let end = projection.last ?? points.last?.value ?? 0
+        return abs(first - target) < top * 0.15 && abs(end - target) >= top * 0.15
+    }
+
+    /// Below when the series fell into the last point (the line comes from
+    /// above) or the target line sits just above; otherwise above.
+    private var labelBelow: Bool {
+        guard let last = points.last?.value else { return false }
+        if let target, abs(target - last) < top * 0.15 { return true }
+        let previous = points.count > 1 ? points[points.count - 2].value : last
+        return previous > last
     }
 
     private func label(_ index: Int) -> String {
