@@ -12,10 +12,10 @@ enum RelayPush {
     /// Asked when the first real errand starts, not at launch, so the owner
     /// knows why Steward wants to notify them.
     static func requestPermission() {
-        guard connection != nil else { return }
         Task {
             _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
-            UIApplication.shared.registerForRemoteNotifications()
+            // Check-in and follow-up notifications are local; pushes need a relay.
+            if connection != nil { UIApplication.shared.registerForRemoteNotifications() }
         }
     }
 
@@ -66,15 +66,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     }
 }
 
-/// Follow-up times as notifications scheduled on the phone itself. Used with
-/// an owner's own relay, which can't send pushes to Steward's app (APNs only
-/// accepts Steward's key), so wake-ups never depend on a server
-/// (docs/adr/0003). Like the relay's, the notification says nothing about
-/// the errand.
+/// Follow-up times as notifications scheduled on the phone itself, so
+/// wake-ups never depend on a server (docs/adr/0003). The notification says
+/// nothing about the errand.
 @MainActor
 enum LocalWake {
-    static var isNeeded: Bool { RelaySettings.choice == .own }
-
     static func set(_ caseID: UUID, at date: Date?) {
         let center = UNUserNotificationCenter.current()
         let id = "wake-\(caseID.uuidString)"

@@ -13,13 +13,52 @@ public struct InboxServer: Codable, Sendable, Equatable {
     public var trustedAuthservID: String?
     /// Where the owner makes an app password.
     public var appPasswordURL: URL?
+    /// The provider's sending server, which takes the same app password.
+    /// `nil` in settings saved before Steward sent mail itself: `sending` fills it in.
+    public var smtp: SMTPServer?
 
-    public init(host: String, port: UInt16 = 993, provider: String, trustedAuthservID: String? = nil, appPasswordURL: URL? = nil) {
+    public init(host: String, port: UInt16 = 993, provider: String, trustedAuthservID: String? = nil, appPasswordURL: URL? = nil, smtp: SMTPServer? = nil) {
         self.host = host
         self.port = port
         self.provider = provider
         self.trustedAuthservID = trustedAuthservID
         self.appPasswordURL = appPasswordURL
+        self.smtp = smtp
+    }
+
+    /// Where approved emails go out: the saved server, the known one for the
+    /// address, or the IMAP host's "smtp." twin on port 465.
+    public func sending(for address: String) -> SMTPServer {
+        if let smtp { return smtp }
+        if let known = Self.known(for: address)?.smtp ?? Self.knownSending(forIncoming: host) { return known }
+        let base = host.lowercased().hasPrefix("imap.") ? String(host.dropFirst(5)) : host
+        return SMTPServer(host: "smtp." + base)
+    }
+
+    /// A well-known provider's sending server, from its incoming one, for an
+    /// address on the owner's own domain (iCloud custom domains, say).
+    public static func knownSending(forIncoming host: String) -> SMTPServer? {
+        switch host.lowercased() {
+        case "imap.gmail.com": SMTPServer(host: "smtp.gmail.com")
+        case "imap.mail.me.com": SMTPServer(host: "smtp.mail.me.com", port: 587, startTLS: true)
+        case "imap.mail.yahoo.com": SMTPServer(host: "smtp.mail.yahoo.com")
+        case "imap.aol.com": SMTPServer(host: "smtp.aol.com")
+        case "imap.fastmail.com": SMTPServer(host: "smtp.fastmail.com")
+        case "imap.gmx.net": SMTPServer(host: "mail.gmx.net")
+        case "outlook.office365.com": SMTPServer(host: "smtp.office365.com", port: 587, startTLS: true)
+        default: nil
+        }
+    }
+
+    /// An outgoing server as the owner typed it: "smtp.example.com" (TLS on
+    /// 465) or "smtp.example.com:587" (STARTTLS). `nil` if it isn't one.
+    public static func sendingServer(typed text: String) -> SMTPServer? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces).lowercased()
+        let parts = trimmed.split(separator: ":", omittingEmptySubsequences: false)
+        guard let host = parts.first.map(String.init), host.contains("."), !host.contains(" "), parts.count <= 2 else { return nil }
+        guard parts.count == 2 else { return SMTPServer(host: host) }
+        guard let port = UInt16(parts[1]) else { return nil }
+        return SMTPServer(host: host, port: port, startTLS: port != 465)
     }
 
     /// The server for a well-known address, or `nil` to ask the owner.
@@ -28,17 +67,22 @@ public struct InboxServer: Codable, Sendable, Equatable {
         switch domain {
         case "gmail.com", "googlemail.com":
             return InboxServer(host: "imap.gmail.com", provider: "Gmail", trustedAuthservID: "mx.google.com",
-                               appPasswordURL: URL(string: "https://myaccount.google.com/apppasswords"))
+                               appPasswordURL: URL(string: "https://myaccount.google.com/apppasswords"),
+                               smtp: SMTPServer(host: "smtp.gmail.com"))
         case "icloud.com", "me.com", "mac.com":
-            return InboxServer(host: "imap.mail.me.com", provider: "iCloud Mail", appPasswordURL: URL(string: "https://account.apple.com"))
+            return InboxServer(host: "imap.mail.me.com", provider: "iCloud Mail", appPasswordURL: URL(string: "https://account.apple.com"),
+                               smtp: SMTPServer(host: "smtp.mail.me.com", port: 587, startTLS: true))
         case let d where d.hasPrefix("yahoo.") || d == "ymail.com":
-            return InboxServer(host: "imap.mail.yahoo.com", provider: "Yahoo Mail", appPasswordURL: URL(string: "https://login.yahoo.com/account/security"))
+            return InboxServer(host: "imap.mail.yahoo.com", provider: "Yahoo Mail", appPasswordURL: URL(string: "https://login.yahoo.com/account/security"),
+                               smtp: SMTPServer(host: "smtp.mail.yahoo.com"))
         case "aol.com":
-            return InboxServer(host: "imap.aol.com", provider: "AOL Mail", appPasswordURL: URL(string: "https://login.aol.com/account/security"))
+            return InboxServer(host: "imap.aol.com", provider: "AOL Mail", appPasswordURL: URL(string: "https://login.aol.com/account/security"),
+                               smtp: SMTPServer(host: "smtp.aol.com"))
         case "fastmail.com", "fastmail.fm":
-            return InboxServer(host: "imap.fastmail.com", provider: "Fastmail", appPasswordURL: URL(string: "https://app.fastmail.com/settings/security/apps"))
+            return InboxServer(host: "imap.fastmail.com", provider: "Fastmail", appPasswordURL: URL(string: "https://app.fastmail.com/settings/security/apps"),
+                               smtp: SMTPServer(host: "smtp.fastmail.com"))
         case "gmx.com", "gmx.net", "gmx.de":
-            return InboxServer(host: "imap.gmx.net", provider: "GMX")
+            return InboxServer(host: "imap.gmx.net", provider: "GMX", smtp: SMTPServer(host: domain == "gmx.com" ? "mail.gmx.com" : "mail.gmx.net"))
         default:
             return nil
         }

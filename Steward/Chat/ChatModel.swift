@@ -186,7 +186,8 @@ final class ChatModel {
     // MARK: Errands
 
     private func startErrand(in id: UUID) {
-        if runner != nil { startAgentErrand(in: id) } else { startDemo(in: id) }
+        // The sample errand writes to a made-up gym: never from the owner's real mailbox.
+        if let runner, runner.isSimulated || CaseService.relayConnection != nil { startAgentErrand(in: id) } else { startDemo(in: id) }
     }
 
     private func begin(_ errand: Errand, in id: UUID) {
@@ -320,7 +321,8 @@ final class ChatModel {
     /// A task's approved errand: a real case built from what the task found,
     /// run by the errand agent with its drafts, send-once and proof.
     func startErrand(_ details: ReplyBlock.Action.Errand, in id: UUID) async -> Result<String, ActionFailure> {
-        guard let runner else { return .failure(.init("Errands need Steward's mail relay, which isn't connected yet.")) }
+        guard let runner else { return .failure(.init("Errands can't run in this preview.")) }
+        if !runner.isSimulated, CaseService.relayConnection == nil, let missing = CaseRunner.missingSetup { return .failure(.init(missing)) }
         guard errand == nil else { return .failure(.init("I'm already on another errand. Once it's finished or stopped, ask me again.")) }
         let caseID = UUID()
         let name = UserDefaults.standard.string(forKey: "owner.name") ?? ""

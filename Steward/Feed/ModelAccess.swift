@@ -72,6 +72,12 @@ nonisolated enum ModelAccess {
         ownKey().map { OpenAICompatibleClient(baseURL: $0.baseURL, model: $0.model, apiKey: $0.key) }
     }
 
+    /// The errand agent's model with no relay: the owner's own key, or a
+    /// debug key from the launch environment.
+    static func agentModel() -> (any ModelClient)? {
+        (ownKey() ?? debugSetup()).map { OpenAICompatibleClient(baseURL: $0.baseURL, model: $0.model, apiKey: $0.key) }
+    }
+
     /// Debug runs only: `STEWARD_MODEL_KEY` in the launch environment, plus
     /// `-feedModel <name>` (or chat's `-agentModel`) and optionally `-agentBaseURL`.
     private static func debugSetup() -> Setup? {

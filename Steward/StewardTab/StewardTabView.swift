@@ -25,7 +25,6 @@ struct StewardTabView: View {
     @State private var lockProblem: String?
     @State private var usesOwnKey = ModelAccess.hasOwnKey
     @State private var inboxAddress = InboxSettings.account?.address
-    @AppStorage(RelaySettings.choiceKey) private var relayChoice = RelayChoice.steward
 
     var body: some View {
         NavigationStack {
@@ -277,19 +276,12 @@ struct StewardTabView: View {
                 Label {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Steward's AI").foregroundStyle(Palette.ink)
-                        Text("Picks a model for each job. Nothing to set up.")
+                        Text("Not running yet. Add your own key for now.")
                             .font(.footnote)
                             .foregroundStyle(Palette.muted)
                     }
                 } icon: {
                     Image(systemName: "sparkles")
-                }
-                Spacer(minLength: 8)
-                if !usesOwnKey {
-                    Image(systemName: "checkmark")
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(Palette.orangeText)
-                        .accessibilityLabel("In use")
                 }
             }
             .listRowBackground(Palette.row)
@@ -299,7 +291,7 @@ struct StewardTabView: View {
                 Label {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Your Own AI Key").foregroundStyle(Palette.ink)
-                        Text(usesOwnKey ? "In use. Goes only to your provider." : "Optional. Never required.")
+                        Text(usesOwnKey ? "In use. Goes only to your provider." : "Needed for errands for now.")
                             .font(.footnote)
                             .foregroundStyle(Palette.muted)
                     }
@@ -322,24 +314,13 @@ struct StewardTabView: View {
     private var mailSection: some View {
         Section {
             NavigationLink {
-                RelayChoiceView()
-            } label: {
-                LabeledContent {
-                    Text(relayChoice.title)
-                } label: {
-                    Label("Relay", systemImage: "arrow.left.arrow.right")
-                        .foregroundStyle(Palette.ink)
-                }
-            }
-            .listRowBackground(Palette.row)
-            NavigationLink {
                 InboxSettingsView()
             } label: {
                 LabeledContent {
                     Text(inboxAddress ?? "Off")
                         .lineLimit(1)
                 } label: {
-                    Label("Your Inbox", systemImage: "tray")
+                    Label("Your Mailbox", systemImage: "tray")
                         .foregroundStyle(Palette.ink)
                 }
             }
@@ -347,7 +328,7 @@ struct StewardTabView: View {
         } header: {
             header("Mail")
         } footer: {
-            Text("Replies wait at the relay or in your own inbox. Steward checks in at 9:00, 13:00 and 18:00, and whenever you open it.")
+            Text("Errands send from your own email once you approve, and replies come back to it. Steward checks in at 9:00, 13:00 and 18:00, and whenever you open it.")
         }
         .onAppear { inboxAddress = InboxSettings.account?.address }
     }

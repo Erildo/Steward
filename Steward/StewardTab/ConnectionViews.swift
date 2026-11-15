@@ -1,8 +1,8 @@
 import SwiftUI
 import StewardCore
 
-/// The owner's own AI key: optional, never required. With it, Steward talks to
-/// the owner's provider directly and nothing passes through Steward's relay.
+/// The owner's own AI key. Steward talks to the owner's provider directly,
+/// with nothing in between. Errands need it until Steward has an AI of its own.
 struct OwnAIKeyView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var key = ""
@@ -41,8 +41,8 @@ struct OwnAIKeyView: View {
                 }
             } footer: {
                 Text(hasKey
-                     ? "Steward is using your key. It stays in this iPhone's Keychain and goes only to your provider. Errands switch to it the next time Steward opens."
-                     : "Your key stays in this iPhone's Keychain and goes only to your provider, never through Steward. Without one, Steward's AI is used.")
+                     ? "Steward is using your key. It stays in this iPhone's Keychain and goes only to your provider."
+                     : "Your key stays in this iPhone's Keychain and goes only to your provider, never through Steward. Errands, the feed and the daily review need one for now.")
             }
             .listRowBackground(Palette.row)
         }
@@ -76,95 +76,13 @@ struct OwnAIKeyView: View {
     }
 }
 
-/// Which relay carries errand mail and wake-ups: Steward's, the owner's own
-/// copy of the open-source relay, or none. Steward never depends on one
-/// server staying up (docs/adr/0003).
-struct RelayChoiceView: View {
-    @AppStorage(RelaySettings.choiceKey) private var choice = RelayChoice.steward
-    @AppStorage(RelaySettings.ownURLKey) private var ownURL = ""
-    @State private var invite = ""
-    @State private var savedInvite = RelaySettings.ownInvite.read() != nil
-
-    var body: some View {
-        Form {
-            Section {
-                Picker("Relay", selection: $choice) {
-                    ForEach(RelayChoice.allCases) { option in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(option.title)
-                            Text(Self.summary(option))
-                                .font(.footnote)
-                                .foregroundStyle(Palette.muted)
-                        }
-                        .tag(option)
-                    }
-                }
-                .pickerStyle(.inline)
-                .labelsHidden()
-            } footer: {
-                Text("The relay gives each errand its own email address, holds replies sealed so only this iPhone can open them, and wakes Steward when they arrive. It can't read your errands. Changes apply the next time Steward opens.")
-            }
-            .listRowBackground(Palette.row)
-
-            if choice == .own {
-                Section {
-                    TextField("Relay address", text: $ownURL)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    SecureField(savedInvite ? "Invite code saved" : "Invite code, if it has one", text: $invite)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .onSubmit(saveInvite)
-                    if !invite.isEmpty {
-                        Button("Save Invite Code", action: saveInvite)
-                    }
-                } header: {
-                    Text("Your relay")
-                } footer: {
-                    if !ownURL.isEmpty && RelaySettings.validURL(ownURL) == nil {
-                        Text("That doesn't look like a web address. It should start with https://.")
-                            .foregroundStyle(.red)
-                    } else {
-                        Text("Run the relay from Steward's open-source code on your own account. Its mail never touches Steward. Your own relay can't send Steward's pushes, so follow-up reminders come from this iPhone, and replies are collected when you open Steward.")
-                    }
-                }
-                .listRowBackground(Palette.row)
-            }
-        }
-        .scrollContentBackground(.hidden)
-        .background(Palette.ground)
-        .navigationTitle("Relay")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-
-    /// One line on what each choice means for the owner.
-    static func summary(_ option: RelayChoice) -> String {
-        switch option {
-        case .steward:
-            RelaySettings.production == nil ? "Nothing to set up. Not running yet." : "Nothing to set up."
-        case .own:
-            "A copy of the relay that you run."
-        case .none:
-            "Chat, tasks and the feed still work. Email errands wait for a relay."
-        }
-    }
-
-    private func saveInvite() {
-        let trimmed = invite.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        try? RelaySettings.ownInvite.write(Data(trimmed.utf8))
-        invite = ""
-        savedInvite = true
-    }
-}
-
-/// Connects the owner's own inbox with an app password, so a company's reply
-/// that went there still reaches its errand (docs/adr/0003).
+/// Connects the owner's own mailbox with an app password. Errands send from
+/// it, and a company's replies are read from it at check-ins (docs/adr/0003).
 struct InboxSettingsView: View {
     @State private var account = InboxSettings.account
     @State private var address = ""
     @State private var host = ""
+    @State private var smtpHost = ""
     @State private var appPassword = ""
     @State private var working = false
     @State private var problem: String?
@@ -181,7 +99,7 @@ struct InboxSettingsView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Palette.ground)
-        .navigationTitle("Your Inbox")
+        .navigationTitle("Your Mailbox")
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -192,6 +110,7 @@ struct InboxSettingsView: View {
             Section {
                 LabeledContent("Address", value: account.address)
                 LabeledContent("Provider", value: account.server.provider)
+                LabeledContent("Sends through", value: account.server.sending(for: account.address).host)
                 LabeledContent("Last checked") {
                     Text(lastCheck > 0 ? Date(timeIntervalSince1970: lastCheck).formatted(.relative(presentation: .named)) : "Not yet")
                 }
@@ -200,7 +119,7 @@ struct InboxSettingsView: View {
                         .foregroundStyle(Palette.orangeText)
                 }
             } footer: {
-                Text("At each check-in, Steward looks only for new mail from companies you have an open errand with, and reads only those emails. It never marks anything as read.")
+                Text("Errands send from this address, only after you approve each email, and your provider keeps a copy in Sent. At each check-in, Steward looks only for new mail from companies you have an open errand with, and reads only those emails. It never marks anything as read.")
             }
             .listRowBackground(Palette.row)
 
@@ -210,7 +129,7 @@ struct InboxSettingsView: View {
                 if let problem {
                     Text(problem).foregroundStyle(.red)
                 }
-                Button("Disconnect Inbox", role: .destructive) {
+                Button("Disconnect Mailbox", role: .destructive) {
                     InboxSettings.remove()
                     self.account = nil
                 }
@@ -226,7 +145,7 @@ struct InboxSettingsView: View {
         working = true
         defer { working = false }
         do {
-            try await InboxSettings.withTimeout(20) { try await InboxSettings.check(account, password: secret).test() }
+            try await Self.testBoth(account, password: secret)
             problem = nil
             lastProblem = ""
         } catch {
@@ -241,7 +160,10 @@ struct InboxSettingsView: View {
     private var server: InboxServer? {
         if let known { return known }
         let trimmed = host.trimmingCharacters(in: .whitespaces)
-        return trimmed.contains(".") && !trimmed.contains(" ") ? InboxServer(host: trimmed, provider: trimmed) : nil
+        guard trimmed.contains("."), !trimmed.contains(" ") else { return nil }
+        var custom = InboxServer(host: trimmed, provider: trimmed)
+        custom.smtp = InboxServer.sendingServer(typed: smtpHost)
+        return custom
     }
 
     private var connect: some View {
@@ -253,7 +175,11 @@ struct InboxSettingsView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 if address.contains("@"), known == nil, !InboxServer.needsOAuth(address) {
-                    TextField("Mail server, such as imap.example.com", text: $host)
+                    TextField("Incoming server, such as imap.example.com", text: $host)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Outgoing server, such as smtp.example.com:587", text: $smtpHost)
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -265,9 +191,9 @@ struct InboxSettingsView: View {
                 if InboxServer.needsOAuth(address) {
                     Text("Outlook, Hotmail and Live only allow sign-in through Microsoft, which Steward doesn't support yet.")
                 } else if let known {
-                    Text("\(known.provider) needs an app password: a separate password just for Steward, which you can revoke any time. It's not your normal password.")
+                    Text("\(known.provider) needs an app password: a separate password just for Steward, which you can revoke any time. It's not your normal password.\(known.provider == "Gmail" ? " Gmail only offers app passwords once 2-Step Verification is on." : "")")
                 } else {
-                    Text("Use an app password from your mail provider, not your normal password. Steward connects securely on port 993.")
+                    Text("Use an app password from your mail provider, not your normal password. Steward reads securely on port 993. For sending, add :587 to the outgoing server if your provider uses that port; otherwise Steward uses 465.")
                 }
             }
             .listRowBackground(Palette.row)
@@ -282,13 +208,13 @@ struct InboxSettingsView: View {
             }
 
             Section {
-                Button(working ? "Connecting…" : "Connect Inbox") { Task { await connectInbox() } }
+                Button(working ? "Connecting…" : "Connect Mailbox") { Task { await connectInbox() } }
                     .disabled(working || server == nil || appPassword.isEmpty || InboxServer.needsOAuth(address))
                 if let problem {
                     Text(problem).foregroundStyle(.red)
                 }
             } footer: {
-                Text("The app password stays in this iPhone's Keychain and goes only to your mail server. The AI never sees it. Steward reads only replies from companies you have an open errand with.")
+                Text("The app password stays in this iPhone's Keychain and goes only to your mail server. The AI never sees it. Steward sends only emails you approve, and reads only replies from companies you have an open errand with.")
             }
             .listRowBackground(Palette.row)
         }
@@ -301,7 +227,7 @@ struct InboxSettingsView: View {
         working = true
         defer { working = false }
         do {
-            try await InboxSettings.withTimeout(20) { try await InboxSettings.check(account, password: secret).test() }
+            try await Self.testBoth(account, password: secret)
             try InboxSettings.save(account, password: secret)
             appPassword = ""
             problem = nil
@@ -311,7 +237,20 @@ struct InboxSettingsView: View {
         }
     }
 
+    /// Logs in to both servers: reading replies and sending approved emails.
+    private static func testBoth(_ account: InboxSettings.Account, password: String) async throws {
+        try await InboxSettings.withTimeout(20) { try await InboxSettings.check(account, password: password).test() }
+        do {
+            // Longer than one read's own deadline, so a slow server shows up as a sending problem.
+            try await withDeadline(50, timeoutError: { SMTPError(.timeout, "The outgoing server took too long to answer.") }) {
+                try await InboxSettings.mailer(account, password: password).test()
+            }
+        } catch let error as SMTPError {
+            throw SMTPError(error.kind, "Reading works, but sending didn't: \(error.message)")
+        }
+    }
+
     private func message(_ error: any Error) -> String {
-        (error as? IMAPError)?.message ?? "Steward couldn't reach that mail server."
+        (error as? IMAPError)?.message ?? (error as? SMTPError)?.message ?? "Steward couldn't reach that mail server."
     }
 }

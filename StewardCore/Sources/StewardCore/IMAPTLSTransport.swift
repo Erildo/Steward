@@ -45,7 +45,17 @@ public final class IMAPTLSTransport: IMAPTransport, @unchecked Sendable {
         }
     }
 
+    /// Waits at most 20 seconds for the server; then the connection is
+    /// cancelled, so a silent server can't hold a check-in.
     public func receive() async throws -> Data {
+        let connection = self.connection
+        return try await withDeadline(20, onTimeout: { connection.cancel() },
+                                      timeoutError: { IMAPError(.timeout, "The mail server took too long to answer.") }) {
+            try await self.receiveNow()
+        }
+    }
+
+    private func receiveNow() async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
             connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { data, _, isComplete, error in
                 if let data, !data.isEmpty { continuation.resume(returning: data) }

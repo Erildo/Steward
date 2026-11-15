@@ -48,10 +48,14 @@ final class CaseRunner {
     }
 
     /// Saves a new case. With the relay, it first gets the case its own
-    /// mailbox, which becomes the address the agent writes from.
+    /// mailbox, which becomes the address the agent writes from; without one,
+    /// the agent writes from the owner's own address.
     @discardableResult
     func open(_ input: CaseFile) async throws -> CaseFile {
         var file = input
+        if relay == nil, mailbox == nil, let account = InboxSettings.account {
+            file.owner.caseAddress = account.address
+        }
         if let relay, file.relayCaseID == nil {
             let opened = try await relay.client().openCase()
             file.relayCaseID = opened.caseId
@@ -70,11 +74,15 @@ final class CaseRunner {
 
     private func wakeNow(_ id: UUID, with wake: Wake, from origin: Origin) async throws -> CaseFile {
         // A case from an earlier launch is read back from the owner's files.
-        let file: CaseFile
+        var file: CaseFile
         if let known = cases[id] {
             file = known
         } else {
             do { file = try store.load(id) } catch { throw UnknownCase() }
+        }
+        // Mail goes out from the mailbox connected now; drafts and the prompt say the same.
+        if relay == nil, mailbox == nil, let account = InboxSettings.account, file.owner.caseAddress != account.address {
+            file.owner.caseAddress = account.address
         }
         let next: CaseFile
         do {
@@ -126,13 +134,17 @@ final class CaseRunner {
     /// date while waiting, or the outcome check's day after a done. The relay
     /// learns only the time, never why.
     private func syncWake(_ file: CaseFile) {
-        guard let relay, let relayCaseID = file.relayCaseID else { return }
+        guard !isSimulated else { return }
         let at: Date? = switch file.state {
         case .waitingForReply(_, let until): until
         case .closed where file.closure?.status == .done && file.outcomeCheck?.answer == nil && !file.isConfirmedByOwner: file.outcomeCheck?.due
         default: nil
         }
-        if LocalWake.isNeeded { LocalWake.set(file.id, at: at) }
+        // With no relay to push, the phone reminds itself.
+        guard let relay, let relayCaseID = file.relayCaseID else {
+            LocalWake.set(file.id, at: at)
+            return
+        }
         Task {
             guard let client = try? await relay.client() else { return }
             if let at { try? await client.setWake(relayCaseID, at: at) } else { try? await client.clearWake(relayCaseID) }
@@ -144,9 +156,9 @@ final class CaseRunner {
     /// launch, when the app comes forward, and on a push. Overlapping calls
     /// share one run.
     func refresh() async {
-        guard relay != nil else { return }
+        guard !isSimulated else { return }
         if let refreshing { return await refreshing.value }
-        relayLog.notice("Refreshing from the relay")
+        relayLog.notice("Checking in")
         let task = Task { @MainActor in
             await collectRelayMail()
             await collectInboxMail()
@@ -262,6 +274,27 @@ extension CaseRunner {
         return CaseRunner(agent: Agent(model: debugModel() ?? SimulatedErrand.model(), mail: mailbox), mailbox: mailbox)
     }
 
+    /// The owner's own mailbox, with no relay: approved emails go out through
+    /// their mail server, replies are read from their inbox at check-ins, and
+    /// the model is their own key. Both are looked up at each use, so
+    /// connecting them in the Steward tab works without reopening the app.
+    static func ownMailbox() -> CaseRunner {
+        // The scripted demo never pairs with real mail.
+        if RelaySettings.model == "scripted" { return .simulated() }
+        return CaseRunner(agent: Agent(model: OwnerModel(), mail: OwnerMailboxMailer()), mailbox: nil)
+    }
+
+    /// What the owner still has to connect before an errand can run, or `nil`.
+    static var missingSetup: String? {
+        let mail = InboxSettings.isConnected, model = ModelAccess.agentModel() != nil
+        switch (mail, model) {
+        case (true, true): return nil
+        case (false, true): return "Errands send from your own email. Connect it in the Steward tab under Mail › Your Mailbox, then ask me again."
+        case (true, false): return "Errands need an AI key. Add yours in the Steward tab under AI › Your Own AI Key, then ask me again."
+        case (false, false): return "Errands need your email and an AI key. Connect both in the Steward tab (Mail › Your Mailbox and AI › Your Own AI Key), then ask me again."
+        }
+    }
+
     /// Real mail through the relay at `url` (`-uiState relay` in debug, with
     /// `-relayURL`). The model is the owner's own key if they added one,
     /// otherwise the relay's proxy, unless a debug key is given, or
@@ -295,5 +328,29 @@ extension CaseRunner {
         #else
         return nil
         #endif
+    }
+}
+
+/// Sends through the owner's mailbox as connected right now.
+nonisolated struct OwnerMailboxMailer: MailSender {
+    struct NotConnected: Error, CustomStringConvertible {
+        var description: String { "No mailbox is connected, so nothing was sent." }
+    }
+
+    func send(_ email: CaseFile.Email, in file: CaseFile) async throws {
+        guard let mailer = InboxSettings.mailer() else { throw NotConnected() }
+        try await mailer.send(email, in: file)
+    }
+}
+
+/// The owner's own AI key as it is right now.
+nonisolated struct OwnerModel: ModelClient {
+    struct NoKey: Error, CustomStringConvertible {
+        var description: String { "No AI key is set up." }
+    }
+
+    func complete(system: String, messages: [ModelMessage], tools: [ToolSpec]) async throws -> AssistantTurn {
+        guard let model = ModelAccess.agentModel() else { throw NoKey() }
+        return try await model.complete(system: system, messages: messages, tools: tools)
     }
 }

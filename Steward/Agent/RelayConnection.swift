@@ -2,44 +2,12 @@ import Foundation
 import Security
 import StewardCore
 
-/// Which relay this phone uses. The relay is optional and swappable
-/// (docs/adr/0003): Steward's own, one the owner runs from the open-source
-/// `relay/`, or none at all. The choice applies the next time the app opens.
-nonisolated enum RelayChoice: String, CaseIterable, Identifiable, Sendable {
-    case steward, own, none
-    var id: Self { self }
-
-    var title: String {
-        switch self {
-        case .steward: "Steward's Relay"
-        case .own: "Your Own Relay"
-        case .none: "No Relay"
-        }
-    }
-}
-
-/// Where the relay is. `production` stays `nil` until Steward's relay is
-/// deployed: until then only an owner's own relay gives live errands.
-/// Debug runs can point at a local relay with
-/// `-uiState relay -relayURL http://localhost:8787` (and `-relayInvite
-/// <secret>` if it's invite-only).
+/// A relay, for debug runs only. Errands don't need one: they send and read
+/// through the owner's own mailbox (docs/adr/0003). Point a debug run at a
+/// local relay with `-uiState relay -relayURL http://localhost:8787` (and
+/// `-relayInvite <secret>` if it's invite-only).
 nonisolated enum RelaySettings {
-    static let production: URL? = nil
-
-    static let choiceKey = "relayChoice"
-    static let ownURLKey = "ownRelayURL"
-    /// The own relay's invite secret, if it's invite-only.
-    static let ownInvite = KeychainSlot(service: "com.steward.relay", account: "ownInvite")
-
-    static var choice: RelayChoice {
-        UserDefaults.standard.string(forKey: choiceKey).flatMap(RelayChoice.init) ?? .steward
-    }
-
-    static var ownURL: URL? {
-        UserDefaults.standard.string(forKey: ownURLKey).flatMap(validURL)
-    }
-
-    /// An `https` address (or `http` for a relay on this network), or `nil`.
+    /// An `https` address (or `http` on this network), or `nil`.
     static func validURL(_ text: String) -> URL? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(),
@@ -47,32 +15,16 @@ nonisolated enum RelaySettings {
         return url
     }
 
-    /// The relay the owner chose, and its invite: `nil` for no relay, or for
-    /// Steward's while it isn't deployed.
-    static var chosen: (url: URL, invite: String?)? {
-        switch choice {
-        case .steward: production.map { ($0, nil) }
-        case .own: ownURL.map { ($0, ownInvite.read().flatMap { String(data: $0, encoding: .utf8) }) }
-        case .none: nil
-        }
-    }
-
-    /// Debug runs: `-relayURL`, or the owner's choice.
     static var url: URL? {
-        #if DEBUG
-        if let text = UserDefaults.standard.string(forKey: "relayURL"), let url = URL(string: text) { return url }
-        #endif
-        return chosen?.url
+        UserDefaults.standard.string(forKey: "relayURL").flatMap(URL.init(string:))
     }
 
     static var invite: String? {
-        #if DEBUG
-        if let invite = UserDefaults.standard.string(forKey: "relayInvite") { return invite }
-        #endif
-        return chosen?.invite
+        UserDefaults.standard.string(forKey: "relayInvite")
     }
 
-    /// The model the agent asks for through the relay's proxy.
+    /// The model the agent asks for through the relay's proxy, or `scripted`
+    /// for the scripted demo run.
     static var model: String {
         UserDefaults.standard.string(forKey: "agentModel") ?? "nvidia/nemotron-3-ultra-550b-a55b:free"
     }

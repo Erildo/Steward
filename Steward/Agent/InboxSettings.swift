@@ -33,6 +33,24 @@ nonisolated enum InboxSettings {
         }
     }
 
+    /// Which approved emails already went out, so a retry never sends twice.
+    static let ledger = SendLedger(url: URL.applicationSupportDirectory.appending(path: "Steward/sent-emails.json"))
+
+    /// Sends approved emails from the owner's own address, or `nil` when no
+    /// mailbox is connected.
+    static func mailer() -> OwnerMailer? {
+        guard let account, let data = password.read(), let secret = String(data: data, encoding: .utf8) else { return nil }
+        return mailer(account, password: secret)
+    }
+
+    static func mailer(_ account: Account, password: String) -> OwnerMailer {
+        OwnerMailer(server: account.server.sending(for: account.address), address: account.address, password: password, ledger: ledger) { server in
+            try await SMTPStreamTransport.connect(server)
+        }
+    }
+
+    static var isConnected: Bool { account != nil && password.read() != nil }
+
     /// App passwords never contain spaces; providers show them in groups.
     static func cleaned(_ password: String) -> String {
         password.filter { !$0.isWhitespace }
@@ -65,17 +83,9 @@ nonisolated enum InboxSettings {
         UserDefaults.standard.set(message, forKey: problemKey)
     }
 
-    /// Runs `work`, giving up after `seconds`: a background check-in only
-    /// gets a short moment.
+    /// Runs `work`, giving up after `seconds` even if `work` is stuck on the
+    /// network: a background check-in only gets a short moment.
     static func withTimeout<T: Sendable>(_ seconds: Double, _ work: @escaping @Sendable () async throws -> T) async throws -> T {
-        try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask { try await work() }
-            group.addTask {
-                try await Task.sleep(for: .seconds(seconds))
-                throw IMAPError(.timeout, "The mail server took too long to answer.")
-            }
-            defer { group.cancelAll() }
-            return try await group.next()!
-        }
+        try await withDeadline(seconds, timeoutError: { IMAPError(.timeout, "The mail server took too long to answer.") }, work)
     }
 }

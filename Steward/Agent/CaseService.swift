@@ -40,36 +40,25 @@ enum CaseService {
         ? CaseStore(folder: URL.temporaryDirectory.appending(path: "cases-\(launchState ?? "debug")-\(UUID().uuidString)"))
         : CaseStore(folder: URL.documentsDirectory.appending(path: "Cases"))
 
-    /// This phone's one link to the relay, shared by errands, tasks, the feed
-    /// and the review: mail, wakes and the model proxy all go through it.
-    /// `nil` on sample launches, and in release until the relay is deployed.
+    /// A link to a relay, for debug runs only (`-uiState relay -relayURL …`).
+    /// Errands don't need one: they use the owner's own mailbox.
     static let relayConnection: RelayConnection? = {
-        switch launchState {
-        case "relay":
-            // Debug: a relay given with `-relayURL`.
-            guard let url = RelaySettings.url else { return nil }
-            let connection = RelayConnection(baseURL: url, invite: RelaySettings.invite)
-            RelayPush.connection = connection
-            return connection
-        case nil, "none":
-            // Release, and `-uiState none`: the relay the owner chose in the
-            // Steward tab (Steward's by default), or none.
-            guard let chosen = RelaySettings.chosen else { return nil }
-            let connection = RelayConnection(baseURL: chosen.url, invite: chosen.invite)
-            RelayPush.connection = connection
-            return connection
-        default:
-            return nil
-        }
+        guard launchState == "relay", let url = RelaySettings.url else { return nil }
+        let connection = RelayConnection(baseURL: url, invite: RelaySettings.invite)
+        RelayPush.connection = connection
+        return connection
     }()
 
-    /// `nil` until a model and real mail are connected: then nothing can act on
-    /// a case, and the app says so. Debug launches get a simulated one.
+    /// What moves errands forward. Real launches use the owner's own mailbox
+    /// and AI key; errands say what's missing until both are connected.
+    /// Debug launches get a simulated one, or the relay.
     static let runner: CaseRunner? = {
         switch launchState {
         case "agent": return .simulated()
         case "tasks", "tasksEmpty", "demo": return .tasksSample(store: store)
-        default: return relayConnection.map { .relay(connection: $0) }
+        case "relay": return relayConnection.map { .relay(connection: $0) }
+        case nil, "none": return .ownMailbox()
+        default: return nil
         }
     }()
 }

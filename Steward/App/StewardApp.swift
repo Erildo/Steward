@@ -5,11 +5,11 @@ struct StewardApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     init() {
-        #if DEBUG
-        // Debug builds open with every tab's sample data, so a phone run from
-        // Xcode, or reopened from the Home Screen, has something to try. A
-        // `-uiState` launch argument still wins; `-uiState none` gives the
-        // owner's real, empty files. Release builds never see this.
+        #if DEBUG && targetEnvironment(simulator)
+        // Debug runs in the Simulator open with every tab's sample data. A
+        // `-uiState` launch argument still wins; `-uiState none` gives real,
+        // empty files. On a phone, debug builds run for real, like release:
+        // the owner's own mailbox, AI key and files (`-uiState demo` for samples).
         UserDefaults.standard.register(defaults: ["uiState": "demo"])
         #endif
     }
