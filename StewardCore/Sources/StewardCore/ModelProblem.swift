@@ -68,7 +68,7 @@ public struct ModelProblem: Equatable, Sendable {
                 : "Your \(provider) account is out of credit. Add some with \(provider), then \(retry.lowercased())."
         case .unknownModel:
             let name = model.map { " \"\($0)\"" } ?? ""
-            return "\(provider) doesn't know the model\(name). Check the model name in \(keyPlace)."
+            return "\(provider) doesn't offer the model\(name). It may be misspelled or retired. Check the model name in \(keyPlace)."
         case .rateLimited:
             return "\(provider) is busy and asked Steward to slow down. \(retry) in a minute."
         case .providerDown:

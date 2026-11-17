@@ -16,11 +16,16 @@ public struct OpenAICompatibleClient: ModelClient {
     public var model: String
     public var apiKey: String?
     public var session: URLSession
+    /// Tools the provider runs on its own servers, sent as given, such as
+    /// Groq's `{"type":"browser_search"}`. When they are the only tools, the
+    /// request requires one, so the model searches rather than guesses.
+    public var builtInTools: [JSONValue]
 
-    public init(baseURL: URL, model: String, apiKey: String? = nil, session: URLSession = .shared) {
+    public init(baseURL: URL, model: String, apiKey: String? = nil, builtInTools: [JSONValue] = [], session: URLSession = .shared) {
         self.baseURL = baseURL
         self.model = model
         self.apiKey = apiKey
+        self.builtInTools = builtInTools
         self.session = session
     }
 
@@ -37,10 +42,20 @@ public struct OpenAICompatibleClient: ModelClient {
         request.timeoutInterval = 180
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let apiKey { request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
-        request.httpBody = try Self.encoder.encode(Request(model: model, system: system, messages: messages, tools: tools))
+        request.httpBody = try Self.encoder.encode(Request(model: model, system: system, messages: messages, tools: tools, builtIn: builtInTools))
 
-        let (data, response) = try await session.data(for: request)
+        let started = Date()
+        let label = "\(baseURL.host() ?? "?") \(model)\(builtInTools.isEmpty ? "" : " +search")"
+        let data: Data, response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            Self.log("\(label) failed after \(Self.seconds(since: started)): \(error)")
+            throw error
+        }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        Self.log("\(label) HTTP \(status) in \(Self.seconds(since: started))"
+                 + ((200..<300).contains(status) ? "" : ": \(String(decoding: data.prefix(400), as: UTF8.self))"))
         guard (200..<300).contains(status) else {
             throw HTTPError(status: status, body: String(decoding: data, as: UTF8.self))
         }
@@ -48,6 +63,7 @@ public struct OpenAICompatibleClient: ModelClient {
         // Some providers (OpenRouter among them) answer 200 with an error
         // inside, for example when the account runs out of credit mid-stream.
         if decoded.choices == nil, let error = decoded.error {
+            Self.log("\(label) error inside the 200 reply: \(error.code.map(String.init) ?? "?") \(error.message ?? "")")
             throw HTTPError(status: error.code ?? 502, body: error.message ?? String(decoding: data, as: UTF8.self))
         }
         guard let message = decoded.choices?.first?.message else { return AssistantTurn() }
@@ -60,18 +76,46 @@ public struct OpenAICompatibleClient: ModelClient {
         return AssistantTurn(text: message.content, toolCalls: calls)
     }
 
+    /// Debug builds only: one line per call in the Xcode console, so a pasted
+    /// log shows which provider and model answered and how. Never the key or
+    /// the owner's messages; an error reply's first 400 characters at most.
+    static func log(_ line: String) {
+        #if DEBUG
+        print("[Steward AI] \(line)")
+        #endif
+    }
+
+    private static func seconds(since start: Date) -> String {
+        String(format: "%.1fs", Date().timeIntervalSince(start))
+    }
+
     // MARK: Wire format
 
     private struct Request: Encodable {
         let model: String
         let messages: [WireMessage]
         /// Left out when empty: some providers reject an empty tool list.
-        let tools: [WireTool]?
+        let tools: [AnyTool]?
+        let tool_choice: String?
 
-        init(model: String, system: String, messages: [ModelMessage], tools: [ToolSpec]) {
+        init(model: String, system: String, messages: [ModelMessage], tools: [ToolSpec], builtIn: [JSONValue] = []) {
             self.model = model
             self.messages = [WireMessage(role: "system", content: system)] + messages.map(WireMessage.init)
-            self.tools = tools.isEmpty ? nil : tools.map { WireTool(function: .init(name: $0.name, description: $0.description, parameters: $0.parameters)) }
+            let all = tools.map { AnyTool.function(WireTool(function: .init(name: $0.name, description: $0.description, parameters: $0.parameters))) }
+                + builtIn.map(AnyTool.builtIn)
+            self.tools = all.isEmpty ? nil : all
+            tool_choice = tools.isEmpty && !builtIn.isEmpty ? "required" : nil
+        }
+    }
+
+    private enum AnyTool: Encodable {
+        case function(WireTool)
+        case builtIn(JSONValue)
+        func encode(to encoder: Encoder) throws {
+            switch self {
+            case .function(let tool): try tool.encode(to: encoder)
+            case .builtIn(let value): try value.encode(to: encoder)
+            }
         }
     }
 

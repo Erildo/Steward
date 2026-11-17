@@ -32,9 +32,25 @@ nonisolated enum ModelAccess {
         return RelayModel(connection: connection, model: name)
     }
 
-    /// The feed's model: it always searches the web.
+    /// The feed's model: it always searches the web. On Groq that means
+    /// asking for its own search tool, which only its gpt-oss models have.
     @MainActor
-    static func feedModel() -> (any ModelClient)? { model(searchesWeb: true) }
+    static func feedModel() -> (any ModelClient)? {
+        if let setup = ownKey() ?? debugSetup(), let search = builtInSearch(model: setup.model, on: setup.baseURL) {
+            return OpenAICompatibleClient(baseURL: setup.baseURL, model: setup.model, apiKey: setup.key, builtInTools: [search])
+        }
+        return model(searchesWeb: true)
+    }
+
+    /// Groq's server-side web search (console.groq.com/docs/browser-search).
+    /// Its Compound models, which searched on their own, were retired in
+    /// September 2026.
+    static func builtInSearch(model: String, on baseURL: URL) -> JSONValue? {
+        guard baseURL.host() == "api.groq.com", groqSearchModels.contains(model) else { return nil }
+        return .object(["type": .string("browser_search")])
+    }
+
+    static let groqSearchModels = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]
 
     /// OpenRouter adds web search to any model with the `:online` suffix.
     static func withWebSearch(_ model: String, on baseURL: URL) -> String {
@@ -59,9 +75,11 @@ nonisolated enum ModelAccess {
         ModelProblem(error, provider: providerName, model: (ownKey() ?? debugSetup())?.model)
     }
 
-    /// Whether the owner's setup can search the web. Only OpenRouter adds
-    /// search to any model (the `:online` suffix); other providers don't here.
-    static func searchesWeb(_ baseURL: URL) -> Bool { baseURL.host() == openRouter.host() }
+    /// Whether the owner's setup can search the web for the Feed: OpenRouter
+    /// adds search to any model (the `:online` suffix), Groq to its gpt-oss models.
+    static func searchesWeb(_ baseURL: URL, model: String) -> Bool {
+        baseURL.host() == openRouter.host() || builtInSearch(model: model, on: baseURL) != nil
+    }
 
     // MARK: Sources
 

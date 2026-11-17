@@ -28,10 +28,16 @@ struct OwnAIKeyView: View {
             } footer: {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Any provider that speaks the OpenAI format works. OpenRouter is filled in, and its model names look like \"provider/model\".")
-                    if let url = RelaySettings.validURL(address), !ModelAccess.searchesWeb(url) {
-                        Text("Only OpenRouter lets Steward search the web. With this provider the Feed works from what the model already knows, so its finds may be dated.")
-                    } else {
-                        Text("Free models work for chat. Searching the web for the Feed costs under a cent a search, even with a free model, so keep a little credit on OpenRouter.")
+                    if let url = RelaySettings.validURL(address) {
+                        if url.host() == ModelAccess.openRouter.host() {
+                            Text("Free models work for chat. Searching the web for the Feed costs under a cent a search, even with a free model, so keep a little credit on OpenRouter.")
+                        } else if url.host() == "api.groq.com" {
+                            Text(ModelAccess.searchesWeb(url, model: model.trimmingCharacters(in: .whitespaces))
+                                 ? "Groq searches the web for the Feed with this model."
+                                 : "On Groq, only openai/gpt-oss-120b and openai/gpt-oss-20b can search the web for the Feed.")
+                        } else {
+                            Text("With this provider Steward can't search the web, so the Feed works from what the model already knows and its finds may be dated.")
+                        }
                     }
                 }
             }

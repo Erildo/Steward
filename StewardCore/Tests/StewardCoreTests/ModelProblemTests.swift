@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import StewardCore
 
@@ -28,7 +29,7 @@ private func http(_ status: Int, _ body: String = "") -> Error {
     #expect(key.isFixedInKeySettings)
 
     let model = ModelProblem(kind: .unknownModel, provider: "OpenRouter", model: "foo/bar")
-    #expect(model.message(in: .feed).contains("\"foo/bar\""))
+    #expect(model.message(in: .feed).contains("\"foo/bar\"") && model.message(in: .feed).contains("retired"))
 
     let credit = ModelProblem(kind: .noCredit, provider: "OpenRouter")
     #expect(credit.message(in: .feed).contains("even with a free model"))
@@ -59,6 +60,43 @@ private final class ErrorBodyProtocol: URLProtocol {
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(#"{"error":{"code":"402","message":"Insufficient credits"}}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// Groq's search runs only when the request carries its tool; with no tools
+/// of Steward's own, the request also requires a tool so the model searches.
+@Test func builtInToolsAreSentAsGivenAndRequired() async throws {
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [CapturingProtocol.self]
+    let client = OpenAICompatibleClient(baseURL: URL(string: "https://example.test/v1")!, model: "openai/gpt-oss-120b",
+                                        builtInTools: [.object(["type": .string("browser_search")])],
+                                        session: URLSession(configuration: config))
+    let turn = try await client.complete(system: "s", messages: [.user("hi")], tools: [])
+    #expect(turn.text == "ok")
+    let body = try #require(CapturingProtocol.lastBody.withLock { $0 })
+    let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+    #expect((json["tools"] as? [[String: String]]) == [["type": "browser_search"]])
+    #expect(json["tool_choice"] as? String == "required")
+}
+
+private final class CapturingProtocol: URLProtocol {
+    static let lastBody = Mutex<Data?>(nil)
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        var data = request.httpBody
+        if data == nil, let stream = request.httpBodyStream {
+            stream.open(); defer { stream.close() }
+            var buffer = Data(); var chunk = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable { let n = stream.read(&chunk, maxLength: chunk.count); if n <= 0 { break }; buffer.append(chunk, count: n) }
+            data = buffer
+        }
+        Self.lastBody.withLock { $0 = data }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"choices":[{"message":{"content":"ok"}}]}"#.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}

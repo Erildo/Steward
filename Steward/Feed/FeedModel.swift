@@ -59,8 +59,8 @@ final class FeedModel {
 
     func refresh() async {
         guard status != .loading else { return }
-        guard let composer else { status = .noModel; return }
-        guard !taste.isEmpty else { return }
+        guard let composer else { status = .noModel; Self.log("Feed: no AI key set up"); return }
+        guard !taste.isEmpty else { Self.log("Feed: taste is empty, nothing to search for"); return }
         status = .loading
         do {
             let next = try await composer.compose(for: taste, after: batch)
@@ -68,8 +68,10 @@ final class FeedModel {
             batch = next
             try? store.save(next)
             status = .idle
+            Self.log("Feed: \(next.cards.count) cards")
         } catch {
             status = .failed(ModelAccess.problem(error))
+            Self.log("Feed failed: \(error)")
         }
     }
 
@@ -135,6 +137,13 @@ final class FeedModel {
         batch = nil
         justShared = []
         status = .idle
+    }
+
+    /// Debug builds only, like the model calls' lines.
+    private static func log(_ line: String) {
+        #if DEBUG
+        print("[Steward AI] \(line)")
+        #endif
     }
 
     #if DEBUG
