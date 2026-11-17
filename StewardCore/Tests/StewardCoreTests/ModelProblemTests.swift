@@ -38,6 +38,16 @@ private func http(_ status: Int, _ body: String = "") -> Error {
     #expect(ModelProblem(kind: .providerDown, provider: "OpenRouter").message(in: .feed).contains("nothing on your side"))
 }
 
+/// On the key screen the fix is right there, so no message points elsewhere.
+@Test func settingsMessagesStayOnTheKeyScreen() {
+    let key = ModelProblem(kind: .keyRejected, provider: "Groq").message(in: .settings)
+    #expect(key == "Groq turned down this key. Paste it again, and make sure it's a Groq key.")
+    let model = ModelProblem(kind: .unknownModel, provider: "OpenRouter", model: "foo/bar").message(in: .settings)
+    #expect(model.contains("\"foo/bar\"") && !model.contains("Steward tab"))
+    #expect(ModelProblem(kind: .rateLimited, provider: "OpenRouter").message(in: .settings).contains("Check again in a minute"))
+    #expect(ModelProblem(kind: .noCredit, provider: "OpenRouter").message(in: .settings).hasSuffix("then check again."))
+}
+
 /// OpenRouter can answer 200 with only an error inside; that must surface as
 /// the error it is, not as an empty reply.
 @Test func errorInsideASuccessfulReplyIsThrown() async throws {

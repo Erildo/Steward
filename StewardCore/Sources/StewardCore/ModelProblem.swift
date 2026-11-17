@@ -23,8 +23,9 @@ public struct ModelProblem: Equatable, Sendable {
     }
 
     /// Where the sentence will be read. In the Feed the next step is a pull
-    /// or a button beside it; in a conversation, the owner writes again.
-    public enum Place: Sendable { case feed, conversation }
+    /// or a button beside it; in a conversation, the owner writes again; in
+    /// settings, the key, model and address are right there to fix.
+    public enum Place: Sendable { case feed, conversation, settings }
 
     public var kind: Kind
     /// The provider's name as the owner knows it, such as "OpenRouter".
@@ -55,9 +56,18 @@ public struct ModelProblem: Equatable, Sendable {
     }
 
     public func message(in place: Place) -> String {
-        let retry = place == .feed ? "Pull to try again" : "Write again to retry"
-        let keyPlace = place == .feed ? "your AI key" : "your key in the Steward tab under AI › Your Own AI Key"
+        let retry: String, keyPlace: String
+        switch place {
+        case .feed: (retry, keyPlace) = ("Pull to try again", "your AI key")
+        case .conversation: (retry, keyPlace) = ("Write again to retry", "your key in the Steward tab under AI › Your Own AI Key")
+        case .settings: (retry, keyPlace) = ("Check again", "")
+        }
         switch kind {
+        case .keyRejected where place == .settings:
+            return "\(provider) turned down this key. Paste it again, and make sure it's a \(provider) key."
+        case .unknownModel where place == .settings:
+            let name = model.map { " \"\($0)\"" } ?? ""
+            return "\(provider) doesn't offer the model\(name). It may be misspelled or retired."
         case .keyRejected:
             return "\(provider) turned down your AI key. Check \(keyPlace)."
         case .noCredit:
@@ -77,10 +87,14 @@ public struct ModelProblem: Equatable, Sendable {
             return "\(provider) took too long to answer. \(retry)."
         case .offline:
             return "This iPhone is offline, so Steward couldn't reach \(provider). \(retry) once you're connected."
+        case .unusableReply where place == .settings:
+            return "\(provider) answered, but not in a form Steward can read. This model may not work with Steward."
         case .unusableReply:
             return place == .feed
                 ? "Steward looked but got nothing it could show. \(retry)."
                 : "\(provider) sent back an answer Steward couldn't read. \(retry)."
+        case .other where place == .settings:
+            return "Steward couldn't get an answer from \(provider). Check the provider address, then check again."
         case .other:
             return place == .feed
                 ? "Steward couldn't get today's finds from \(provider). \(retry)."

@@ -3,36 +3,64 @@ import StewardCore
 
 /// The owner's own AI key. Steward talks to the owner's provider directly,
 /// with nothing in between. Errands need it until Steward has an AI of its own.
+///
+/// A saved key stays put: the field starts blank and blank means "keep it",
+/// so changing the model or address never asks for the key again. Saving
+/// checks the setup with the provider and shows the outcome here.
 struct OwnAIKeyView: View {
-    @Environment(\.dismiss) private var dismiss
     @State private var key = ""
     @State private var model = ""
     @State private var address = ModelAccess.openRouter.absoluteString
-    @State private var hasKey = ModelAccess.hasOwnKey
+    @State private var saved: ModelAccess.Setup?
+    @State private var checking = false
     @State private var problem: String?
+    @AppStorage(ModelAccess.lastCheckKey) private var lastCheck = ""
+    @FocusState private var typing: Bool
+
+    private var typedKey: String { key.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var typedModel: String { model.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var url: URL? { RelaySettings.validURL(address) }
+
+    /// The form as a setup, with the saved key when none is typed.
+    private var setup: ModelAccess.Setup? {
+        guard let url, !typedModel.isEmpty, let key = typedKey.isEmpty ? saved?.key : typedKey else { return nil }
+        return .init(key: key, model: typedModel, baseURL: url)
+    }
+
+    /// Whether the form differs from what's saved.
+    private var edited: Bool {
+        guard let saved else { return true }
+        return !typedKey.isEmpty || typedModel != saved.model || url != saved.baseURL
+    }
 
     var body: some View {
         Form {
             Section {
-                SecureField("Key", text: $key)
+                SecureField(saved == nil ? "Key" : "Saved key", text: $key)
+                    .focused($typing)
                     .textContentType(.password)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 TextField("Model name", text: $model)
+                    .focused($typing)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 TextField("Provider address", text: $address)
+                    .focused($typing)
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
             } footer: {
                 VStack(alignment: .leading, spacing: 6) {
+                    if saved != nil {
+                        Text("Leave the key blank to keep the one you saved.")
+                    }
                     Text("Any provider that speaks the OpenAI format works. OpenRouter is filled in, and its model names look like \"provider/model\".")
-                    if let url = RelaySettings.validURL(address) {
+                    if let url {
                         if url.host() == ModelAccess.openRouter.host() {
                             Text("Free models work for chat. Searching the web for the Feed costs under a cent a search, even with a free model, so keep a little credit on OpenRouter.")
                         } else if url.host() == "api.groq.com" {
-                            Text(ModelAccess.searchesWeb(url, model: model.trimmingCharacters(in: .whitespaces))
+                            Text(ModelAccess.searchesWeb(url, model: typedModel)
                                  ? "Groq searches the web for the Feed with this model."
                                  : "On Groq, only openai/gpt-oss-120b and openai/gpt-oss-20b can search the web for the Feed.")
                         } else {
@@ -44,16 +72,27 @@ struct OwnAIKeyView: View {
             .listRowBackground(Palette.row)
 
             Section {
-                Button("Use This Key") { save() }
-                    .disabled(key.isEmpty || model.isEmpty || RelaySettings.validURL(address) == nil)
-                if hasKey {
+                if saved != nil, !edited {
+                    status
+                }
+                if saved == nil || edited {
+                    Button(saved == nil ? "Use This Key" : "Save Changes") { Task { await save() } }
+                        .disabled(setup == nil || checking)
+                } else {
+                    Button(checking ? "Checking…" : "Check Key") { Task { await check() } }
+                        .disabled(checking)
+                }
+                if saved != nil {
                     Button("Remove My Key", role: .destructive) {
                         ModelAccess.removeOwnKey()
-                        hasKey = false
+                        saved = nil
+                        key = ""
+                        lastCheck = ""
                     }
+                    .disabled(checking)
                 }
             } footer: {
-                Text(hasKey
+                Text(saved != nil
                      ? "Steward is using your key. It stays in this iPhone's Keychain and goes only to your provider."
                      : "Your key stays in this iPhone's Keychain and goes only to your provider, never through Steward. Errands, the feed and the daily review need one for now.")
             }
@@ -64,9 +103,10 @@ struct OwnAIKeyView: View {
         .navigationTitle("Your Own AI Key")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            if let own = ModelAccess.ownKey() {
-                model = own.model
-                address = own.baseURL.absoluteString
+            saved = ModelAccess.ownKey()
+            if let saved {
+                model = saved.model
+                address = saved.baseURL.absoluteString
             }
         }
         .alert("Couldn't save the key", isPresented: Binding(get: { problem != nil }, set: { if !$0 { problem = nil } })) {
@@ -76,16 +116,59 @@ struct OwnAIKeyView: View {
         }
     }
 
-    private func save() {
-        guard let url = RelaySettings.validURL(address) else { return }
+    /// Whether the saved key works, as of the last check.
+    @ViewBuilder private var status: some View {
+        if checking {
+            Label {
+                Text("Asking \(provider)…").foregroundStyle(Palette.muted)
+            } icon: {
+                ProgressView()
+            }
+        } else if lastCheck == "ok" {
+            Label {
+                Text("Working. \(provider) answered with \(typedModel).").foregroundStyle(Palette.ink)
+            } icon: {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            }
+        } else if !lastCheck.isEmpty {
+            Label {
+                Text(lastCheck).foregroundStyle(Palette.ink)
+            } icon: {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+            }
+        } else {
+            Label {
+                Text("Not checked yet.").foregroundStyle(Palette.muted)
+            } icon: {
+                Image(systemName: "circle.dashed").foregroundStyle(Palette.muted)
+            }
+        }
+    }
+
+    private var provider: String { url.map(ModelAccess.providerName(for:)) ?? "your provider" }
+
+    private func save() async {
+        guard let setup else { return }
+        typing = false
         do {
-            try ModelAccess.saveOwnKey(.init(key: key.trimmingCharacters(in: .whitespacesAndNewlines), model: model.trimmingCharacters(in: .whitespacesAndNewlines), baseURL: url))
-            key = ""
-            hasKey = true
-            dismiss()
+            try ModelAccess.saveOwnKey(.init(key: setup.key, model: setup.model, baseURL: setup.baseURL))
         } catch {
             problem = error.localizedDescription
+            return
         }
+        saved = setup
+        key = ""
+        model = setup.model
+        address = setup.baseURL.absoluteString
+        await check()
+    }
+
+    private func check() async {
+        guard let saved else { return }
+        typing = false
+        checking = true
+        defer { checking = false }
+        lastCheck = await ModelAccess.check(saved)?.message(in: .settings) ?? "ok"
     }
 }
 

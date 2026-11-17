@@ -61,9 +61,14 @@ nonisolated enum ModelAccess {
     /// The provider's name as the owner knows it, for messages when a call fails.
     @MainActor
     static var providerName: String {
-        guard let host = (ownKey() ?? debugSetup())?.baseURL.host()?.lowercased() else {
+        guard let url = (ownKey() ?? debugSetup())?.baseURL else {
             return CaseService.relayConnection == nil ? "your AI provider" : "Steward's server"
         }
+        return providerName(for: url)
+    }
+
+    static func providerName(for baseURL: URL) -> String {
+        guard let host = baseURL.host()?.lowercased() else { return "your AI provider" }
         let known = ["openrouter.ai": "OpenRouter", "api.openai.com": "OpenAI", "api.anthropic.com": "Anthropic",
                      "generativelanguage.googleapis.com": "Google", "api.groq.com": "Groq", "api.mistral.ai": "Mistral"]
         return known[host] ?? host.replacingOccurrences(of: "api.", with: "")
@@ -104,7 +109,30 @@ nonisolated enum ModelAccess {
         try ownKeySlot.write(JSONEncoder().encode(own))
     }
 
-    static func removeOwnKey() { ownKeySlot.delete() }
+    static func removeOwnKey() {
+        ownKeySlot.delete()
+        UserDefaults.standard.removeObject(forKey: lastCheckKey)
+    }
+
+    // MARK: Checking
+
+    /// The last check's outcome, for the Steward tab: empty when never
+    /// checked, "ok" when the provider answered, else the owner-facing problem.
+    static let lastCheckKey = "ownKey.lastCheck"
+
+    /// Sends the smallest possible request to see that the provider takes the
+    /// key and knows the model. Returns `nil` when it works.
+    static func check(_ setup: Setup) async -> ModelProblem? {
+        let client = OpenAICompatibleClient(baseURL: setup.baseURL, model: setup.model, apiKey: setup.key)
+        do {
+            _ = try await withDeadline(30, timeoutError: { URLError(.timedOut) }) {
+                try await client.complete(system: "Reply with the single word OK.", messages: [.user("OK?")], tools: [])
+            }
+            return nil
+        } catch {
+            return ModelProblem(error, provider: providerName(for: setup.baseURL), model: setup.model)
+        }
+    }
 
     /// The owner's own key as a model client, for the errand agent too.
     static func ownModel() -> (any ModelClient)? {

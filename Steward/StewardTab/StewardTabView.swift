@@ -24,6 +24,7 @@ struct StewardTabView: View {
     @AppStorage(AppLock.storageKey) private var locks = false
     @State private var lockProblem: String?
     @State private var usesOwnKey = ModelAccess.hasOwnKey
+    @AppStorage(ModelAccess.lastCheckKey) private var ownKeyCheck = ""
     @State private var inboxAddress = InboxSettings.account?.address
 
     var body: some View {
@@ -291,7 +292,7 @@ struct StewardTabView: View {
                 Label {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Your Own AI Key").foregroundStyle(Palette.ink)
-                        Text(usesOwnKey ? "In use. Goes only to your provider." : "Needed for errands for now.")
+                        keyStatus
                             .font(.footnote)
                             .foregroundStyle(Palette.muted)
                     }
@@ -306,6 +307,19 @@ struct StewardTabView: View {
             Text("Steward never depends on one company's server. Bring your own key at any time.")
         }
         .onAppear { usesOwnKey = ModelAccess.hasOwnKey }
+    }
+
+    /// The key row's subtitle, with the last check's outcome when there is one.
+    @ViewBuilder private var keyStatus: some View {
+        if !usesOwnKey {
+            Text("Needed for errands for now.")
+        } else if ownKeyCheck == "ok" {
+            Text("\(Text(Image(systemName: "checkmark.circle.fill")).foregroundStyle(.green)) Working. Goes only to your provider.")
+        } else if !ownKeyCheck.isEmpty {
+            Text("\(Text(Image(systemName: "xmark.circle.fill")).foregroundStyle(.red)) Not working. Tap to see why.")
+        } else {
+            Text("In use. Goes only to your provider.")
+        }
     }
 
     // MARK: Mail
