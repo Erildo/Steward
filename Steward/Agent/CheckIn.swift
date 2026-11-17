@@ -18,20 +18,33 @@ enum CheckIn {
 
     /// One check-in. In the background, it tells the owner how many errands
     /// wait on them; in the foreground they're already looking.
-    static func run(inBackground: Bool) async {
-        guard let runner = CaseService.runner, !runner.isSimulated else { return }
+    /// Returns what happened, in a few words, for the background-run notification.
+    @discardableResult
+    static func run(inBackground: Bool) async -> String {
+        guard let runner = CaseService.runner, !runner.isSimulated else { return "skipped (no mailbox set up)" }
         let before = Set(waitingOnOwnerIDs(runner.allCases()))
         await runner.refresh()
         let cases = runner.allCases()
         schedule(cases)
+        let outcome = cases.isEmpty ? "ran, no errands" : "ran, \(cases.count) errand\(cases.count == 1 ? "" : "s") checked"
         guard inBackground else {
             UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [digestID])
-            return
+            return outcome
         }
         // Only news is worth a notification: errands that newly wait on the owner.
         let waiting = waitingOnOwnerIDs(cases)
-        guard !Set(waiting).subtracting(before).isEmpty, let body = CheckInSummary.message(waitingOnOwner: waiting.count) else { return }
+        guard !Set(waiting).subtracting(before).isEmpty, let body = CheckInSummary.message(waitingOnOwner: waiting.count) else { return outcome }
         post(digestID, body: body, at: nil)
+        return outcome
+    }
+
+    /// One notification per background run, so the owner can see that iOS
+    /// really gave Steward its time while the app was closed.
+    static func announceBackgroundRun(_ job: String, outcome: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "Steward ran in the background"
+        content.body = "\(job): \(outcome) at \(Date.now.formatted(date: .omitted, time: .shortened))."
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "background-run-\(UUID().uuidString)", content: content, trigger: nil))
     }
 
     /// Asks iOS for the next check-in, and replaces the one notification that

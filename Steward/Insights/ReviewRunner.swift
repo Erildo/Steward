@@ -77,11 +77,16 @@ final class ReviewRunner {
         }
     }
 
-    /// A background refresh: run if due, then ask for the next one.
-    static func runInBackground() async {
-        guard let runner = shared else { return }
+    /// A background refresh: run if due, then ask for the next one. Returns
+    /// what happened, in a few words, for the background-run notification.
+    static func runInBackground() async -> String {
+        guard let runner = shared else { return "skipped (sample data)" }
+        let before = runner.record.schedule.lastAttempt
         await runner.runIfDue()
         runner.scheduleBackgroundRefresh()
+        let schedule = runner.record.schedule
+        guard let attempt = schedule.lastAttempt, attempt != before else { return "not due yet" }
+        return (schedule.lastSuccess ?? .distantPast) >= attempt ? "ran" : "failed"
     }
 
     /// Asks iOS for a background refresh once the next review may run.

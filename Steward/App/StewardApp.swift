@@ -20,11 +20,13 @@ struct StewardApp: App {
         }
         // The daily review, when iOS gives Steward a moment in the background.
         .backgroundTask(.appRefresh(ReviewRunner.taskID)) {
-            await ReviewRunner.runInBackground()
+            let outcome = await ReviewRunner.runInBackground()
+            await CheckIn.announceBackgroundRun("Daily review", outcome: outcome)
         }
         // Errand check-ins, a few times a day (docs/adr/0003).
         .backgroundTask(.appRefresh(CheckIn.taskID)) {
-            await CheckIn.run(inBackground: true)
+            let outcome = await CheckIn.run(inBackground: true)
+            await CheckIn.announceBackgroundRun("Check-in", outcome: outcome)
         }
     }
 }
