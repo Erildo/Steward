@@ -181,8 +181,9 @@ enum ReviewSources {
         let goals = (try? FeedStore(folder: FeedFolder.url).loadTaste().goals) ?? []
         let weekAgo = now.addingTimeInterval(-7 * 86_400)
 
-        let open = stewardTasks.filter { !$0.isFinished }.sorted { $0.lastActivity > $1.lastActivity }.prefix(20).map {
-            "\($0.goal): \($0.statusLine(connected: true))"
+        // Only real tasks: a chat that was answered isn't open work.
+        let open = stewardTasks.filter { $0.isTask && !$0.isFinished }.sorted { $0.lastActivity > $1.lastActivity }.prefix(20).map {
+            "\($0.title): \($0.statusLine(connected: true))"
         } + ownTasks.filter { !$0.isDone }.prefix(20).map { task in
             "\(task.title) (the owner's own\(task.due.map { ", due \(stamp($0))" } ?? ""))"
         }

@@ -239,6 +239,14 @@ struct StewardTaskMenu: View {
     @Environment(TasksModel.self) private var model
 
     var body: some View {
+        if task.isTask { taskMoves } else {
+            // A conversation: the one move is putting it on the list.
+            Button("Add to Tasks", systemImage: "checklist") { model.track(task.id, undoable: true) }
+        }
+    }
+
+    @ViewBuilder
+    private var taskMoves: some View {
         let status = TaskStatus(of: task)
         if status == .onIt, task.isOverdue, model.canWork {
             Button("Check Back Now", systemImage: "arrow.clockwise") { model.checkBack(task.id) }
@@ -251,6 +259,11 @@ struct StewardTaskMenu: View {
         }
         if [.needsYou, .onIt].contains(status) {
             Button("Take Over", systemImage: "hand.raised") { model.takeOverTask(task.id) }
+        }
+        // The rules guessed wrong: keep the chat, drop it from the list. An
+        // errand always stays: a company owes an answer.
+        if task.caseID == nil, !task.isFinished {
+            Button("Not a Task", systemImage: "checklist.unchecked") { model.untrack(task.id) }
         }
         Divider()
         if task.isFinished {

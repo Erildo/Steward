@@ -21,7 +21,7 @@ enum TaskItem: Identifiable {
     var title: String {
         switch self {
         case .own(let task): task.title
-        case .steward(let task): task.goal
+        case .steward(let task): task.title
         case .errand(let file): file.title
         }
     }
@@ -114,12 +114,19 @@ final class TasksModel {
 
     // MARK: Sections
 
+    /// Conversations that are tasks. Chats that only answered never list.
+    private var trackedTasks: [StewardTask] { stewardTasks.filter(\.isTask) }
+
     /// Steward is waiting on the owner: a draft to approve or a question.
     var needsYou: [TaskItem] {
         let errands = listedCases.filter { TaskStatus(of: $0) == .needsYou }.map(TaskItem.errand)
-        let tasks = stewardTasks.filter { TaskStatus(of: $0) == .needsYou }.map(TaskItem.steward)
+        let tasks = trackedTasks.filter { TaskStatus(of: $0) == .needsYou }.map(TaskItem.steward)
         return (errands + tasks).sorted { lastActivity($0) > lastActivity($1) }.filter(matches)
     }
+
+    /// Everything that's the owner's move: Steward waits on them, or handed
+    /// it back. Waiting on them comes first; each row says which.
+    var yourMove: [TaskItem] { needsYou + handedBack }
 
     /// Cases a Steward task carries show inside that task, not on their own.
     private var listedCases: [CaseFile] {
@@ -145,7 +152,7 @@ final class TasksModel {
     /// Steward's errands and tasks that came back to the owner to finish.
     var handedBack: [TaskItem] {
         (listedCases.filter { TaskStatus(of: $0) == .yours }.map(TaskItem.errand)
-            + stewardTasks.filter { TaskStatus(of: $0) == .yours }.map(TaskItem.steward))
+            + trackedTasks.filter { TaskStatus(of: $0) == .yours }.map(TaskItem.steward))
             .sorted { lastActivity($0) > lastActivity($1) }
             .filter(matches)
     }
@@ -154,7 +161,7 @@ final class TasksModel {
     func matchCount(in scope: TaskScope) -> Int {
         switch scope {
         case .mine: mine.count + done.filter(scope.contains).count
-        case .steward: needsYou.count + handedBack.count + stewards.count + done.filter(scope.contains).count
+        case .steward: yourMove.count + stewards.count + done.filter(scope.contains).count
         }
     }
 
@@ -162,14 +169,14 @@ final class TasksModel {
     func hasItems(in scope: TaskScope) -> Bool {
         switch scope {
         case .mine: !ownTasks.isEmpty
-        case .steward: !listedCases.isEmpty || !stewardTasks.isEmpty
+        case .steward: !listedCases.isEmpty || !trackedTasks.isEmpty
         }
     }
 
     /// Errands Steward is working on or waiting on the company for, soonest wake first.
     var stewards: [TaskItem] {
         let errands = listedCases.filter { TaskStatus(of: $0) == .onIt }.map(TaskItem.errand)
-        let tasks = stewardTasks.filter { TaskStatus(of: $0) == .onIt }.map(TaskItem.steward)
+        let tasks = trackedTasks.filter { TaskStatus(of: $0) == .onIt }.map(TaskItem.steward)
         return (tasks + errands).sorted { nextWake($0) < nextWake($1) }.filter(matches)
     }
 
@@ -185,22 +192,22 @@ final class TasksModel {
             let status = TaskStatus(of: $0)
             return status == .done || status == .stopped
         }.map(TaskItem.errand)
-        let tasks = stewardTasks.filter(\.isFinished).map(TaskItem.steward)
+        let tasks = trackedTasks.filter(\.isFinished).map(TaskItem.steward)
         return (own + errands + tasks).sorted { finishDate($0) > finishDate($1) }.filter(matches)
     }
 
     var openCount: Int {
         ownTasks.filter { !$0.isDone }.count
             + listedCases.filter { [.needsYou, .yours, .onIt].contains(TaskStatus(of: $0)) }.count
-            + stewardTasks.filter { !$0.isFinished }.count
+            + trackedTasks.filter { !$0.isFinished }.count
     }
 
-    var totalCount: Int { ownTasks.count + listedCases.count + stewardTasks.count }
+    var totalCount: Int { ownTasks.count + listedCases.count + trackedTasks.count }
 
     /// Unfiltered, for the tab badge.
     var needsYouCount: Int {
         listedCases.filter { TaskStatus(of: $0) == .needsYou }.count
-            + stewardTasks.filter { TaskStatus(of: $0) == .needsYou }.count
+            + trackedTasks.filter { TaskStatus(of: $0) == .needsYou }.count
     }
 
     var isEmpty: Bool { cases.isEmpty && ownTasks.isEmpty && stewardTasks.isEmpty }
@@ -214,7 +221,7 @@ final class TasksModel {
         let key = Self.normalized(title)
         guard !key.isEmpty else { return nil }
         if let task = ownTasks.first(where: { !$0.isDone && Self.normalized($0.title) == key }) { return .own(task) }
-        if let task = stewardTasks.first(where: { !$0.isFinished && Self.normalized($0.goal) == key }) { return .steward(task) }
+        if let task = trackedTasks.first(where: { !$0.isFinished && Self.normalized($0.title) == key }) { return .steward(task) }
         if let file = cases.first(where: {
             [.needsYou, .yours, .onIt].contains(TaskStatus(of: $0)) && Self.normalized($0.title) == key
         }) { return .errand(file) }
@@ -265,7 +272,7 @@ final class TasksModel {
         let removed = ownTasks.remove(at: index)
         saveTasks()
         let goal = removed.note.isEmpty ? removed.title : "\(removed.title)\n\(removed.note)"
-        guard let created = createStewardTask(goal) else { return }
+        guard let created = createStewardTask(goal, tracked: removed.title) else { return }
         offerUndo("Handed to Steward") { [weak self] in
             guard let self else { return }
             stewardTasks.removeAll { $0.id == created.id }
@@ -280,13 +287,17 @@ final class TasksModel {
     /// Hands Steward anything. It shows up at once and Steward starts on it.
     @discardableResult
     func addStewardTask(_ goal: String) -> StewardTask? {
-        createStewardTask(goal)
+        // Added in Tasks, so it's a task from the start.
+        createStewardTask(goal, tracked: goal.split(separator: "\n").first.map(String.init))
     }
 
-    private func createStewardTask(_ goal: String, wakes: Bool = true) -> StewardTask? {
+    /// `tracked` names the task when it starts as one; nil starts a plain
+    /// conversation that becomes a task only if something is owed.
+    private func createStewardTask(_ goal: String, wakes: Bool = true, tracked: String? = nil) -> StewardTask? {
         let goal = goal.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !goal.isEmpty else { return nil }
         var task = StewardTask(goal: goal)
+        if let tracked { task.track(tracked) } else { task.tracked = false }
         task.say(.owner, goal)
         stewardTasks.append(task)
         saveStewardTasks()
@@ -389,7 +400,33 @@ final class TasksModel {
     func setCase(_ id: UUID, _ caseID: UUID) {
         guard var task = stewardTask(id) else { return }
         task.caseID = caseID
+        task.track(file(caseID)?.title)
         replace(task)
+    }
+
+    /// The owner puts a conversation on their task list. Whatever was last
+    /// said, the move is theirs until they or Steward pick it up.
+    func track(_ id: UUID, title: String? = nil, undoable: Bool = false) {
+        guard let before = stewardTask(id), !before.isTask || title != nil else { return }
+        var task = before
+        task.track(title)
+        if case .resting(let date) = task.state { task.state = .handedBack(note: "You're tracking this", date: date) }
+        replace(task)
+        if undoable { offerUndo("Added to Tasks") { [weak self] in self?.replace(before) } }
+    }
+
+    /// The owner says this isn't a task: it leaves Tasks and the badge, and
+    /// the conversation stays in Chats as it is.
+    func untrack(_ id: UUID) {
+        guard let before = stewardTask(id), before.isTask, before.caseID == nil else { return }
+        var task = before
+        task.tracked = false
+        switch task.state {
+        case .needsAnswer, .handedBack, .done, .waiting: task.state = .resting(date: .now)
+        default: break
+        }
+        replace(task)
+        offerUndo("Removed from Tasks") { [weak self] in self?.replace(before) }
     }
 
     func setPinned(_ id: UUID, _ pinned: Bool) {
@@ -429,6 +466,11 @@ final class TasksModel {
                 if let current = stewardTask(id), current.state == task.state || current.state == .working {
                     // And anything they wrote meanwhile, after this reply.
                     next.messages += current.messages.dropFirst(task.messages.count)
+                    // And tracking they changed meanwhile.
+                    if current.tracked != task.tracked || current.taskTitle != task.taskTitle {
+                        next.tracked = current.tracked
+                        next.taskTitle = current.taskTitle ?? next.taskTitle
+                    }
                     replace(next)
                 }
             } catch {
@@ -693,6 +735,8 @@ enum TaskStatus: Equatable {
     /// Steward handed it back, or the owner took it over.
     case yours
     case onIt, done, stopped
+    /// A conversation, not a task: nobody owes a move.
+    case chat
 
     init(of file: CaseFile) {
         switch file.state {
@@ -711,10 +755,15 @@ enum TaskStatus: Equatable {
     }
 
     init(of task: StewardTask) {
+        // A conversation that isn't a task: Steward replying, or at rest.
+        guard task.isTask else {
+            self = task.state == .working ? .onIt : .chat
+            return
+        }
         switch task.state {
         case .working, .waiting: self = .onIt
         case .needsAnswer: self = .needsYou
-        case .handedBack: self = .yours
+        case .handedBack, .resting: self = .yours
         case .done: self = .done
         case .stopped: self = .stopped
         }
@@ -727,6 +776,7 @@ enum TaskStatus: Equatable {
         case .onIt: "Steward is on it"
         case .done: "Done"
         case .stopped: "Not finished"
+        case .chat: "Conversation"
         }
     }
 }

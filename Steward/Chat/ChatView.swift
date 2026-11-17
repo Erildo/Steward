@@ -42,8 +42,9 @@ struct ChatTab: View {
 
 // MARK: Chats
 
-/// Every conversation, pinned first, then the most recent. The face on each
-/// row says who moves next, the same as in Tasks.
+/// Every conversation, pinned first, then the most recent. Only some are
+/// tasks: those carry a checklist mark and also show in Tasks. The face says
+/// who moves next, and orange only when Steward waits on the owner.
 private struct ConversationList: View {
     @Environment(TasksModel.self) private var tasks
     @Environment(ChatModel.self) private var chat
@@ -65,7 +66,7 @@ private struct ConversationList: View {
                 ContentUnavailableView {
                     Label("No chats yet", systemImage: "bubble.left.and.bubble.right")
                 } description: {
-                    Text("Tell Steward about an errand, and the conversation stays here.")
+                    Text("Ask Steward anything. Conversations stay here; the ones with something still to do also go on your task list.")
                 } actions: {
                     Button("Start a Chat") { router.newChat() }
                         .buttonStyle(.borderedProminent)
@@ -100,6 +101,12 @@ private struct ConversationList: View {
                             Button(task.isPinned ? "Unpin" : "Pin", systemImage: task.isPinned ? "pin.slash" : "pin") {
                                 tasks.setPinned(task.id, !task.isPinned)
                             }
+                            if !task.isTask {
+                                Button("Add to Tasks", systemImage: "checklist") { tasks.track(task.id, undoable: true) }
+                            } else if task.caseID == nil, !task.isFinished {
+                                Button("Not a Task", systemImage: "checklist.unchecked") { tasks.untrack(task.id) }
+                            }
+                            Divider()
                             Button("Delete", systemImage: "trash", role: .destructive) { delete(task.id) }
                         }
                     }
@@ -154,6 +161,12 @@ private struct ConversationRow: View {
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
                     Spacer(minLength: 4)
+                    if task.isTask, !task.isFinished {
+                        Image(systemName: "checklist")
+                            .font(.caption)
+                            .foregroundStyle(Palette.muted)
+                            .accessibilityLabel("On your task list")
+                    }
                     if task.isPinned {
                         Image(systemName: "pin.fill")
                             .font(.caption2)

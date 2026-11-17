@@ -24,6 +24,9 @@ public struct TaskLoop: Sendable {
         /// Apply these with `Memory.remember` to the live memory, never the
         /// copy itself: the owner may have forgotten something meanwhile.
         public var kept: [Memory.Item]
+        /// The outcome's title when the model called `track_task` this turn:
+        /// the conversation is now a task. Nil leaves that as it was.
+        public var tracked: String? = nil
     }
 
     public let model: any ModelClient
@@ -34,11 +37,12 @@ public struct TaskLoop: Sendable {
         self.maxSteps = maxSteps
     }
 
-    /// The tools offered: the ones that end a turn, `remember` when there is
-    /// memory, and only the proposals this phone allows. A tool that isn't
+    /// The tools offered: the ones that end a turn, `track_task`, `remember`
+    /// when there is memory, and only the proposals this phone allows. A tool that isn't
     /// allowed is never offered, rather than forbidden in the prompt.
     public static func tools(withMemory: Bool, proposals: Set<String> = []) -> [ToolSpec] {
         var names = TaskSpec.finalTools.subtracting(ActionProposal.tools).union(proposals.intersection(ActionProposal.tools))
+        names.insert("track_task")
         if withMemory { names.insert("remember") }
         return TaskSpec.toolSpecs(only: names)
     }
@@ -47,6 +51,7 @@ public struct TaskLoop: Sendable {
                     proposals: Set<String> = [], now: Date = .now) async throws -> Outcome {
         var messages = start
         var kept: [Memory.Item] = []
+        var tracked: String?
         let tools = Self.tools(withMemory: memory != nil, proposals: proposals)
         for _ in 0..<maxSteps {
             let turn = try await model.complete(system: TaskSpec.system, messages: messages, tools: tools)
@@ -56,6 +61,16 @@ public struct TaskLoop: Sendable {
             // alongside the answer is still kept.
             var results: [(String, String)] = []
             for call in side {
+                if call.name == "track_task" {
+                    let title = call.arguments["title"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    guard !title.isEmpty else {
+                        results.append((call.id, "Not tracked: give the outcome as a short title."))
+                        continue
+                    }
+                    tracked = String(title.prefix(80))
+                    results.append((call.id, "Tracked: it shows in the owner's Tasks as “\(tracked!)”."))
+                    continue
+                }
                 let (result, note) = Self.run(call, memory: &memory, ownerJustSpoke: ownerJustSpoke)
                 if let note { kept.append(note) }
                 results.append((call.id, result))
@@ -74,7 +89,7 @@ public struct TaskLoop: Sendable {
                 }
                 switch ActionProposal.parse(final, now: now) {
                 case .success(let action):
-                    return Outcome(end: .proposal(action, text: text), kept: kept)
+                    return Outcome(end: .proposal(action, text: text), kept: kept, tracked: tracked)
                 case .failure(let error):
                     answered.append(final)
                     results.append((final.id, "Not proposed: \(error.message)"))
@@ -84,12 +99,12 @@ public struct TaskLoop: Sendable {
                 }
             }
             if final != nil || side.isEmpty {
-                return Outcome(end: .call(final, text: text), kept: kept)
+                return Outcome(end: .call(final, text: text), kept: kept, tracked: tracked)
             }
             messages.append(.assistant(text: turn.text, toolCalls: side))
             for (id, result) in results { messages.append(.tool(callID: id, content: result)) }
         }
-        return Outcome(end: .stuck, kept: kept)
+        return Outcome(end: .stuck, kept: kept, tracked: tracked)
     }
 
     static func run(_ call: ToolCall, memory: inout Memory?, ownerJustSpoke: Bool) -> (String, Memory.Item?) {

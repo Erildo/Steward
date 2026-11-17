@@ -51,3 +51,26 @@ private func call(_ name: String, _ args: [String: JSONValue], id: String = UUID
     let outcome = try await TaskLoop(model: ScriptedModelClient([AssistantTurn(text: "Hi")])).run(messages: [.user("go")], memory: &memory, ownerJustSpoke: true)
     #expect(outcome.end == .call(nil, text: "Hi"))
 }
+
+@Test func trackTaskNamesTheOutcomeAndTheTurnCarriesOn() async throws {
+    let model = ScriptedModelClient([
+        AssistantTurn(toolCalls: [call("track_task", ["title": .string("Find a dentist that takes my insurance")])]),
+        AssistantTurn(toolCalls: [call("ask_owner", ["question": .string("Which insurer?")])]),
+    ])
+    var memory: Memory? = nil
+    let outcome = try await TaskLoop(model: model).run(messages: [.user("go")], memory: &memory, ownerJustSpoke: true)
+    #expect(outcome.tracked == "Find a dentist that takes my insurance")
+    guard case .call(let final?, _) = outcome.end else { Issue.record("no final call"); return }
+    #expect(final.name == "ask_owner")
+    #expect(await model.calls == 2)
+}
+
+@Test func aPlainAnswerTracksNothing() async throws {
+    var memory: Memory? = nil
+    let outcome = try await TaskLoop(model: ScriptedModelClient([AssistantTurn(text: "About 10%.")])).run(messages: [.user("tip?")], memory: &memory, ownerJustSpoke: true)
+    #expect(outcome.tracked == nil)
+}
+
+@Test func trackTaskIsAlwaysOffered() {
+    #expect(TaskLoop.tools(withMemory: false).map(\.name).contains("track_task"))
+}

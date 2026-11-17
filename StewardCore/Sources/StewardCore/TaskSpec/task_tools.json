@@ -69,6 +69,22 @@
     }
   },
   {
+    "name": "track_task",
+    "description": "Put this conversation on the owner's task list. Call it when you take on an outcome that outlives this reply: work over days, something to chase or follow up, or something the owner asked you to keep track of. Never for a question you answer now, advice, or chat. Proposals, wait and hand_back track it on their own.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "The outcome, as a short task name in the owner's language: \"Cancel the gym membership\", \"Find a dentist that takes my insurance\". Not the owner's first words."
+        }
+      },
+      "required": [
+        "title"
+      ]
+    }
+  },
+  {
     "name": "remember",
     "description": "Keep something about the owner for later tasks: a preference, a goal, a fact about their life. Use it when it will help next time, not for details of this task. The owner can see and delete everything you keep.",
     "parameters": {

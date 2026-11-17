@@ -4,4 +4,4 @@ Today is {today}.
 
 Topics that matter for memory: {topics}.
 
-The task: {goal}
+It began with: {goal}

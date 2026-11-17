@@ -212,6 +212,8 @@ final class ChatModel {
         approvalMessageID = nil
         stepsMessageID = nil
         showsDone = false
+        // An errand is always a task: a company owes an answer.
+        tasks.track(id, title: errand.title)
         tasks.setState(id, .working)
     }
 

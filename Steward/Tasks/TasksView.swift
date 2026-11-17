@@ -137,8 +137,7 @@ struct TasksView: View {
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
             }
-            section(.needsYou, model.needsYou)
-            section(.backToYou, model.handedBack)
+            section(.yourMove, model.yourMove)
             section(.stewards, model.stewards, footer: model.canAct ? nil : "Steward isn't connected yet, so these are paused.")
             doneSection
         }
@@ -280,12 +279,11 @@ struct TasksView: View {
 }
 
 enum TaskSection: String, Hashable {
-    case needsYou, backToYou, stewards, yours, done
+    case yourMove, stewards, yours, done
 
     var title: String {
         switch self {
-        case .needsYou: "Needs you"
-        case .backToYou: "Back with you"
+        case .yourMove: "Your move"
         case .stewards: "Steward is on it"
         case .yours: "To do"
         case .done: "Done"
@@ -546,14 +544,14 @@ struct TaskRow: View {
             case .yours: CheckCircle(done: false) { model.markTaskDone(task.id) }
             case .done: FinishedMark(done: true)
             case .stopped: FinishedMark(done: false)
-            case .needsYou, .onIt: EmptyView()
+            case .needsYou, .onIt, .chat: EmptyView()
             }
         case .errand(let file):
             switch TaskStatus(of: file) {
             case .yours: CheckCircle(done: false) { model.markDone(file.id) }
             case .done: FinishedMark(done: true)
             case .stopped: FinishedMark(done: false)
-            case .needsYou, .onIt: EmptyView()
+            case .needsYou, .onIt, .chat: EmptyView()
             }
         }
     }
@@ -634,6 +632,9 @@ struct TaskAvatar: View {
                 .background { WorkingRing(turning: turning).padding(-4) }
         case .done, .stopped:
             StewardAvatar(size: size, blinks: false, neutral: true).opacity(0.45)
+        case .chat:
+            // At rest: just the cat, no ring, nothing owed.
+            StewardAvatar(size: size, blinks: false, neutral: true)
         }
     }
 
@@ -977,7 +978,7 @@ struct StatusCircle: View {
                 Image(systemName: "checkmark")
                     .font(.footnote.weight(.bold))
                     .foregroundStyle(Palette.ground)
-            case .stopped:
+            case .stopped, .chat:
                 Circle().strokeBorder(Palette.muted.opacity(0.7), lineWidth: 2)
                 Image(systemName: "xmark")
                     .font(.caption2.weight(.bold))
