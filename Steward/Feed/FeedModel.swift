@@ -69,6 +69,13 @@ final class FeedModel {
             try? store.save(next)
             status = .idle
             Self.log("Feed: \(next.cards.count) cards")
+        } catch is CancellationError {
+            // The tab went away or the pull ended: nothing failed.
+            status = .idle
+            Self.log("Feed: refresh cancelled")
+        } catch let error as URLError where error.code == .cancelled {
+            status = .idle
+            Self.log("Feed: refresh cancelled")
         } catch {
             status = .failed(ModelAccess.problem(error))
             Self.log("Feed failed: \(error)")
