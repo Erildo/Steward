@@ -297,7 +297,7 @@ struct ConversationView: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .principal) {
-            StewardActivityPill(activity: chat.activity) { showsPanel.toggle() }
+            StewardActivityPill(activity: chat.activity(in: id)) { showsPanel.toggle() }
                 .popover(isPresented: $showsPanel, arrowEdge: .top) { panel }
         }
         .sharedBackgroundVisibility(.hidden)
@@ -365,6 +365,11 @@ private struct ThreadView: View {
     private var busy: Bool { chat.isWorking(in: task.id) }
     private var latestOwnerID: UUID? { messages.last { $0.author == .owner }?.id }
     private var latestStewardID: UUID? { messages.last { $0.author == .steward }?.id }
+    /// Under the owner's last words, like Messages: Read once Steward has
+    /// picked them up, Delivered while they wait behind a reply in flight.
+    private var receipt: String {
+        busy && !tasks.queued.contains(task.id) ? "Read" : "Delivered"
+    }
     private var isErrandRunningHere: Bool { chat.errandConversationID == task.id && chat.errand != nil }
 
     var body: some View {
@@ -382,7 +387,7 @@ private struct ThreadView: View {
                         MessageRow(
                             message: message,
                             endsGroup: ThreadTime.endsGroup(index, in: messages),
-                            showsStatus: message.id == latestOwnerID && message.id == messages.last?.id,
+                            status: message.id == latestOwnerID && message.id == messages.last?.id ? receipt : nil,
                             hasFocusRing: message.id == latestStewardID,
                             context: BlockContext(
                                 conversationID: task.id,
@@ -395,9 +400,8 @@ private struct ThreadView: View {
                         )
                         .id(message.id)
                     }
-                    if busy {
-                        WorkingRow().id("working")
-                    } else if let problem = tasks.problems[task.id] {
+                    // Steward's progress lives in the pill up top, not down here.
+                    if !busy, let problem = tasks.problems[task.id] {
                         Label(problem, systemImage: "exclamationmark.triangle")
                             .font(.footnote)
                             .foregroundStyle(Palette.ink)
@@ -430,9 +434,7 @@ private struct ThreadView: View {
 
     private func scrollToEnd(_ proxy: ScrollViewProxy) {
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) {
-            if busy {
-                proxy.scrollTo("working", anchor: .bottom)
-            } else if let last = messages.last {
+            if let last = messages.last {
                 proxy.scrollTo(last.id, anchor: .bottom)
             }
         }
@@ -505,7 +507,7 @@ private struct FocusRing: View {
 private struct MessageRow: View {
     let message: StewardTask.Message
     let endsGroup: Bool
-    let showsStatus: Bool
+    let status: String?
     var hasFocusRing = false
     let context: BlockContext
     let answer: (String) -> Void
@@ -544,8 +546,8 @@ private struct MessageRow: View {
                     }
                     .padding(.top, block.isPrompt ? 2 : 0)
             }
-            if showsStatus {
-                Text("Delivered")
+            if let status {
+                Text(status)
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(Palette.muted)
                     .padding(.trailing, 2)
@@ -648,19 +650,6 @@ struct FormattedReply: View {
     /// Bold, italics, code and links inside a line; plain text if it doesn't parse.
     static func inline(_ text: String) -> AttributedString {
         (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
-    }
-}
-
-private struct WorkingRow: View {
-    var body: some View {
-        HStack(spacing: 8) {
-            ProgressView().controlSize(.small).tint(Palette.muted)
-            Text("Steward is working")
-                .font(.footnote)
-                .foregroundStyle(Palette.muted)
-            Spacer()
-        }
-        .padding(.vertical, 6)
     }
 }
 

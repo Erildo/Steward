@@ -65,6 +65,9 @@ final class TasksModel {
 
     /// Cases Steward is acting on right now, after the owner's tap.
     private(set) var working: Set<UUID> = []
+    /// Conversations where the owner wrote while Steward was replying; their
+    /// words get an answer as soon as that reply lands.
+    private(set) var queued: Set<UUID> = []
     /// The last action that didn't go through, per case, in plain words.
     private(set) var problems: [UUID: String] = [:]
 
@@ -293,10 +296,16 @@ final class TasksModel {
 
     /// The owner writes in a task's thread: an answer, or anything else.
     func send(_ id: UUID, _ text: String) {
-        guard var task = stewardTask(id), !working.contains(id) else { return }
+        guard var task = stewardTask(id) else { return }
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         task.say(.owner, text)
+        // Mid-reply: keep the words now, and answer them once this reply lands.
+        if working.contains(id) {
+            replace(task)
+            queued.insert(id)
+            return
+        }
         // Writing on a finished or handed-back task picks it back up.
         task.state = .working
         replace(task)
@@ -413,15 +422,23 @@ final class TasksModel {
         problems[id] = nil
         Task {
             do {
-                let next = try await agent.work(on: task, wake: wake)
+                var next = try await agent.work(on: task, wake: wake)
                 // Keep anything the owner did meanwhile (stop, take over).
                 if let current = stewardTask(id), current.state == task.state || current.state == .working {
+                    // And anything they wrote meanwhile, after this reply.
+                    next.messages += current.messages.dropFirst(task.messages.count)
                     replace(next)
                 }
             } catch {
                 problems[id] = ModelAccess.problem(error).message(in: .conversation)
             }
             working.remove(id)
+            // The owner wrote during that reply: answer it now.
+            if queued.remove(id) != nil, problems[id] == nil, var task = stewardTask(id), task.messages.last?.author == .owner {
+                task.state = .working
+                replace(task)
+                work(id, .message)
+            }
         }
     }
 

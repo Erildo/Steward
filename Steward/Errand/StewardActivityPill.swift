@@ -8,6 +8,13 @@ struct StewardActivityPill: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var needsYou: Bool { activity == .needsYou }
+    /// Only an errand opens the panel; a chat reply has nothing more to show.
+    private var opensPanel: Bool {
+        switch activity {
+        case .working, .needsYou: true
+        default: false
+        }
+    }
 
     var body: some View {
         Button(action: action) {
@@ -17,6 +24,7 @@ struct StewardActivityPill: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(needsYou ? Palette.onOrange : Palette.ink)
                     .lineLimit(1)
+                    .contentTransition(.opacity)
                 if case .working(_, let number, let total) = activity {
                     Text("\(number)/\(total)")
                         .font(.caption.weight(.medium).monospacedDigit())
@@ -29,11 +37,16 @@ struct StewardActivityPill: View {
             .contentShape(.capsule)
         }
         .buttonStyle(.plain)
-        .allowsHitTesting(activity != .idle && activity != .done)
+        .allowsHitTesting(opensPanel)
         .glassEffect(needsYou ? .regular.tint(Palette.orange) : .regular, in: .capsule)
         .animation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.8), value: activity)
         .accessibilityLabel(accessibilityText)
-        .accessibilityHint(activity == .idle || activity == .done ? "" : "Shows the errand")
+        .accessibilityHint(opensPanel ? "Shows the errand" : "")
+        // VoiceOver hears each change as it happens, not only when it lands on the pill.
+        .onChange(of: activity) { _, new in
+            guard new != .idle else { return }
+            AccessibilityNotification.Announcement(accessibilityText).post()
+        }
     }
 
     private var title: String {
@@ -42,6 +55,8 @@ struct StewardActivityPill: View {
         case .working(let step, _, _): step
         case .needsYou: "Needs your OK"
         case .done: "Done"
+        case .replying: "Thinking"
+        case .problem: "Couldn't reply"
         }
     }
 
@@ -57,8 +72,15 @@ struct StewardActivityPill: View {
         switch activity {
         case .idle:
             StewardAvatar()
-        case .working:
+        case .working, .replying:
             StewardAvatar().overlay { WorkingArc(animates: !reduceMotion) }
+        case .problem:
+            Image(systemName: "exclamationmark")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(Palette.ink)
+                .frame(width: 30, height: 30)
+                .background(Palette.stewardBubble, in: .circle)
+                .accessibilityHidden(true)
         case .needsYou:
             Image(systemName: "hand.raised.fill")
                 .font(.subheadline.weight(.semibold))

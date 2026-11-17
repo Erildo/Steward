@@ -12,7 +12,8 @@ enum LiveErrandActivity {
         if let errandTitle { title = errandTitle }
 
         switch activity {
-        case .idle:
+        case .idle, .replying, .problem:
+            // Only errands go on the lock screen; a chat reply is over in seconds.
             end(nil, policy: .immediate)
         case .working(let step, let number, let total):
             show(.init(phase: .working, step: step, number: number, total: total))

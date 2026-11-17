@@ -54,6 +54,16 @@ final class ChatModel {
         return .working(step: errand.steps[index].activeTitle, number: index + 1, total: errand.steps.count)
     }
 
+    /// What the pill says in one conversation: the errand's state only in the
+    /// errand's own chat, else this chat's reply, else plain "Steward".
+    func activity(in id: UUID?) -> StewardActivity {
+        guard let id else { return .idle }
+        if id == errandConversationID, activity != .idle { return activity }
+        if isWorking(in: id) { return .replying }
+        if tasks.problems[id] != nil { return .problem }
+        return .idle
+    }
+
     /// Steward is busy in this conversation, on an errand or a general task.
     func isWorking(in id: UUID) -> Bool {
         (isErrandWorking && errandConversationID == id) || tasks.working.contains(id)

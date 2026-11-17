@@ -63,4 +63,9 @@ enum StewardActivity: Equatable {
     case working(step: String, number: Int, total: Int)
     case needsYou
     case done
+    /// A general reply is in flight. The model's own steps (a web search
+    /// inside the call) can't be seen from here, so it says no more than this.
+    case replying
+    /// The last reply failed; the thread says why.
+    case problem
 }
