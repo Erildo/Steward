@@ -63,6 +63,7 @@ final class ReviewRunner {
         record.schedule.started(at: now)
         save()
 
+        OpenAICompatibleClient.log("Daily review: running")
         let input = await ReviewSources.input(memory: memory.memory, record: record, now: now)
         do {
             let result = try await DailyReview(model: model, now: { now }).run(input)

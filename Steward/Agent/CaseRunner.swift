@@ -73,6 +73,7 @@ final class CaseRunner {
     }
 
     private func wakeNow(_ id: UUID, with wake: Wake, from origin: Origin) async throws -> CaseFile {
+        OpenAICompatibleClient.log("Errand \(id.uuidString.prefix(8)): wake \(String(describing: wake).prefix(40)) from \(origin)")
         // A case from an earlier launch is read back from the owner's files.
         var file: CaseFile
         if let known = cases[id] {
@@ -159,6 +160,7 @@ final class CaseRunner {
         guard !isSimulated else { return }
         if let refreshing { return await refreshing.value }
         relayLog.notice("Checking in")
+        OpenAICompatibleClient.log("Check-in: \(knownCases().count) errand(s) on file")
         let task = Task { @MainActor in
             await collectRelayMail()
             await collectInboxMail()
@@ -219,6 +221,7 @@ final class CaseRunner {
         do {
             let (deliveries, next) = try await InboxSettings.withTimeout(25) { try await check.run(cases: cases, cursor: cursor) }
             relayLog.notice("Inbox check found \(deliveries.count) reply(s)")
+            OpenAICompatibleClient.log("Inbox check: \(deliveries.count) reply(s) for \(Set(deliveries.map(\.caseID)).count) errand(s)")
             var kept = true
             for delivery in deliveries {
                 do {
@@ -242,6 +245,7 @@ final class CaseRunner {
     private func runDueTimers() async {
         for file in knownCases() {
             guard case .waitingForReply(_, let until) = file.state, until <= .now else { continue }
+            OpenAICompatibleClient.log("Errand \(file.id.uuidString.prefix(8)): wait ran out \(until.formatted(.relative(presentation: .named)))")
             _ = try? await wake(file.id, with: .timer, from: .relay)
         }
     }

@@ -79,7 +79,7 @@ public struct OpenAICompatibleClient: ModelClient {
     /// Debug builds only: one line per call in the Xcode console, so a pasted
     /// log shows which provider and model answered and how. Never the key or
     /// the owner's messages; an error reply's first 400 characters at most.
-    static func log(_ line: String) {
+    public static func log(_ line: String) {
         #if DEBUG
         print("[Steward AI] \(line)")
         #endif

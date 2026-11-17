@@ -405,6 +405,7 @@ final class TasksModel {
 
     /// Tasks left mid-step when the app last closed: pick them up again.
     func resumeStalled() {
+        OpenAICompatibleClient.log("Tasks: resuming \(stewardTasks.filter { $0.state == .working }.count) task(s) left working")
         for task in stewardTasks where task.state == .working && !working.contains(task.id) {
             work(task.id, task.messages.last?.author == .owner && task.messages.count > 1 ? .message : .start)
         }
@@ -418,6 +419,7 @@ final class TasksModel {
 
     private func work(_ id: UUID, _ wake: TaskWake) {
         guard let agent, let task = stewardTask(id), !working.contains(id) else { return }
+        OpenAICompatibleClient.log("Task \(id.uuidString.prefix(8)): work (\(wake))")
         working.insert(id)
         problems[id] = nil
         Task {
@@ -817,6 +819,7 @@ extension TasksModel {
     /// owner's real files.
     @MainActor
     static func launch() -> TasksModel {
+        OpenAICompatibleClient.log("Tasks: model created")
         let taskStore = OwnerTaskStore(url: CaseService.store.folder
             .deletingLastPathComponent()
             .appending(path: CaseService.usesScratchFiles ? "owner-tasks-\(UUID().uuidString).json" : "OwnerTasks.json"))
