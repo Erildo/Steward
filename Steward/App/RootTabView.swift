@@ -21,12 +21,13 @@ struct RootTabView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
-        let tasks = TasksModel.launch()
-        _tasks = State(initialValue: tasks)
-        _chat = State(initialValue: ChatModel.launch(tasks: tasks))
-        let steward = StewardTabModel.launch(tasks: tasks)
-        _steward = State(initialValue: steward)
-        ActionAbilities.steward = steward
+        // SwiftUI may build this view many times (it did hundreds of times a
+        // session) and keeps only the first @State. Launching models here
+        // each time resumed stalled tasks on a throwaway model, firing a
+        // model call per rebuild. `AppModels` launches them once per run.
+        _tasks = State(initialValue: AppModels.tasks)
+        _chat = State(initialValue: AppModels.chat)
+        _steward = State(initialValue: AppModels.steward)
     }
 
     private func unlock() {
@@ -92,3 +93,17 @@ struct RootTabView: View {
     }
 }
 
+
+/// The models the root view shares, launched once per run. Launching has
+/// side effects (resuming stalled tasks, seeding samples, wiring
+/// `ActionAbilities`), so it must not repeat when SwiftUI rebuilds the view.
+@MainActor
+private enum AppModels {
+    static let tasks = TasksModel.launch()
+    static let chat = ChatModel.launch(tasks: tasks)
+    static let steward: StewardTabModel = {
+        let steward = StewardTabModel.launch(tasks: tasks)
+        ActionAbilities.steward = steward
+        return steward
+    }()
+}
