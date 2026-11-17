@@ -85,8 +85,10 @@ final class TasksModel {
     private let store: CaseStore
     private let taskStore: OwnerTaskStore
     private let stewardStore: JSONListStore<StewardTask>
-    /// Works on general tasks. `nil` while no model is connected.
-    private let agent: (any TaskAgent)?
+    /// Works on general tasks. `nil` while no model is connected. Looked up
+    /// at each use, so a key added in the Steward tab works without a relaunch.
+    private let makeAgent: () -> (any TaskAgent)?
+    private var agent: (any TaskAgent)? { makeAgent() }
     /// Moves cases forward. `nil` while nothing is connected, so the owner's
     /// buttons are shown but can't act.
     private let runner: CaseRunner?
@@ -96,11 +98,11 @@ final class TasksModel {
     var canWork: Bool { agent != nil }
 
     init(store: CaseStore, taskStore: OwnerTaskStore, stewardStore: JSONListStore<StewardTask>,
-         runner: CaseRunner?, agent: (any TaskAgent)?, isSample: Bool) {
+         runner: CaseRunner?, agent: @autoclosure @escaping () -> (any TaskAgent)?, isSample: Bool) {
         self.store = store
         self.taskStore = taskStore
         self.stewardStore = stewardStore
-        self.agent = agent
+        self.makeAgent = agent
         self.runner = runner
         self.isSample = isSample
         // Chat moves cases too; show its wakes here as they land.
@@ -417,7 +419,7 @@ final class TasksModel {
                     replace(next)
                 }
             } catch {
-                problems[id] = "Steward couldn't get through this step. Write again to retry."
+                problems[id] = ModelAccess.problem(error).message(in: .conversation)
             }
             working.remove(id)
         }
@@ -816,11 +818,11 @@ extension TasksModel {
         }
         // Sample launches get the scripted stand-in; otherwise a real model
         // when one is set up (the relay's proxy, or a debug key), or nothing.
-        let agent: (any TaskAgent)? = CaseService.isTasksSample || CaseService.isChatSample
-            ? SampleTaskAgent()
-            : ModelAccess.model(searchesWeb: true).map { ModelTaskAgent(model: $0, memory: .shared) }
+        let sample: (any TaskAgent)? = CaseService.isTasksSample || CaseService.isChatSample ? SampleTaskAgent() : nil
         let model = TasksModel(store: CaseService.store, taskStore: taskStore, stewardStore: stewardStore,
-                               runner: CaseService.runner, agent: agent, isSample: CaseService.isTasksSample)
+                               runner: CaseService.runner,
+                               agent: sample ?? ModelAccess.model(searchesWeb: true).map { ModelTaskAgent(model: $0, memory: .shared) },
+                               isSample: CaseService.isTasksSample)
         model.reload()
         model.resumeStalled()
         return model

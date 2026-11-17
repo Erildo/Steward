@@ -45,7 +45,12 @@ public struct OpenAICompatibleClient: ModelClient {
             throw HTTPError(status: status, body: String(decoding: data, as: UTF8.self))
         }
         let decoded = try JSONDecoder().decode(Response.self, from: data)
-        guard let message = decoded.choices.first?.message else { return AssistantTurn() }
+        // Some providers (OpenRouter among them) answer 200 with an error
+        // inside, for example when the account runs out of credit mid-stream.
+        if decoded.choices == nil, let error = decoded.error {
+            throw HTTPError(status: error.code ?? 502, body: error.message ?? String(decoding: data, as: UTF8.self))
+        }
+        guard let message = decoded.choices?.first?.message else { return AssistantTurn() }
         let calls = try (message.tool_calls ?? []).map { call in
             let args = call.function.arguments.isEmpty
                 ? [:]
@@ -121,7 +126,19 @@ public struct OpenAICompatibleClient: ModelClient {
     }
 
     private struct Response: Decodable {
-        var choices: [Choice]
+        var choices: [Choice]?
+        var error: ErrorBody?
+        struct ErrorBody: Decodable {
+            var code: Int?
+            var message: String?
+            init(from decoder: Decoder) throws {
+                let c = try decoder.container(keyedBy: CodingKeys.self)
+                // Usually a number, sometimes a string like "429".
+                code = (try? c.decode(Int.self, forKey: .code)) ?? (try? c.decode(String.self, forKey: .code)).flatMap(Int.init)
+                message = try? c.decode(String.self, forKey: .message)
+            }
+            enum CodingKeys: String, CodingKey { case code, message }
+        }
         struct Choice: Decodable { var message: Message }
         struct Message: Decodable {
             var content: String?

@@ -42,6 +42,27 @@ nonisolated enum ModelAccess {
         return model + ":online"
     }
 
+    /// The provider's name as the owner knows it, for messages when a call fails.
+    @MainActor
+    static var providerName: String {
+        guard let host = (ownKey() ?? debugSetup())?.baseURL.host()?.lowercased() else {
+            return CaseService.relayConnection == nil ? "your AI provider" : "Steward's server"
+        }
+        let known = ["openrouter.ai": "OpenRouter", "api.openai.com": "OpenAI", "api.anthropic.com": "Anthropic",
+                     "generativelanguage.googleapis.com": "Google", "api.groq.com": "Groq", "api.mistral.ai": "Mistral"]
+        return known[host] ?? host.replacingOccurrences(of: "api.", with: "")
+    }
+
+    /// Why a call to the model failed, worded for the owner.
+    @MainActor
+    static func problem(_ error: Error) -> ModelProblem {
+        ModelProblem(error, provider: providerName, model: (ownKey() ?? debugSetup())?.model)
+    }
+
+    /// Whether the owner's setup can search the web. Only OpenRouter adds
+    /// search to any model (the `:online` suffix); other providers don't here.
+    static func searchesWeb(_ baseURL: URL) -> Bool { baseURL.host() == openRouter.host() }
+
     // MARK: Sources
 
     /// The owner's own key: any OpenAI-compatible provider, OpenRouter by

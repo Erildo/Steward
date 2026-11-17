@@ -12,7 +12,7 @@ final class FeedModel {
         case loading
         /// No model is set up, so the feed can't refresh.
         case noModel
-        case failed(String)
+        case failed(ModelProblem)
     }
 
     private(set) var taste = TasteProfile()
@@ -22,12 +22,14 @@ final class FeedModel {
     private(set) var justShared: [SharedItem] = []
 
     private let store: FeedStore
-    private let composer: FeedComposer?
+    /// Looked up at each use, so a key added in the Steward tab works without a relaunch.
+    private let makeModel: () -> (any ModelClient)?
+    private var composer: FeedComposer? { makeModel().map { FeedComposer(model: $0) } }
     private let now: () -> Date
 
-    init(store: FeedStore, model: (any ModelClient)?, now: @escaping () -> Date = { .now }) {
+    init(store: FeedStore, model: @autoclosure @escaping () -> (any ModelClient)?, now: @escaping () -> Date = { .now }) {
         self.store = store
-        self.composer = model.map { FeedComposer(model: $0) }
+        self.makeModel = model
         self.now = now
         load()
     }
@@ -67,7 +69,7 @@ final class FeedModel {
             try? store.save(next)
             status = .idle
         } catch {
-            status = .failed(Self.message(for: error))
+            status = .failed(ModelAccess.problem(error))
         }
     }
 
@@ -135,6 +137,17 @@ final class FeedModel {
         status = .idle
     }
 
+    #if DEBUG
+    /// `-feedProblem noCredit` (any `ModelProblem.Kind` name) shows that banner.
+    func showDebugProblem() {
+        let kinds: [String: ModelProblem.Kind] = ["keyRejected": .keyRejected, "noCredit": .noCredit, "unknownModel": .unknownModel,
+                                                  "rateLimited": .rateLimited, "providerDown": .providerDown, "timedOut": .timedOut,
+                                                  "offline": .offline, "unusableReply": .unusableReply, "other": .other]
+        guard let name = UserDefaults.standard.string(forKey: "feedProblem"), let kind = kinds[name] else { return }
+        status = .failed(ModelProblem(kind: kind, provider: "OpenRouter", model: "inclusionai/ling-3.2-flash:free"))
+    }
+    #endif
+
     // MARK: Private
 
     private func load() {
@@ -145,21 +158,6 @@ final class FeedModel {
 
     private func saveTaste() {
         try? store.save(taste)
-    }
-
-    private static func message(for error: Error) -> String {
-        if error is FeedComposer.NothingUsable {
-            return "Steward looked but found nothing worth showing. Pull to try again."
-        }
-        if let http = error as? OpenAICompatibleClient.HTTPError {
-            return http.status == 401 || http.status == 403
-                ? "Steward wasn't allowed to search just now. Your taste is safe. Pull to try again later."
-                : "Steward's search service had a problem. Pull to try again."
-        }
-        if (error as? URLError) != nil {
-            return "Steward couldn't reach the internet. Pull to try again."
-        }
-        return "Something went wrong. Pull to try again."
     }
 }
 
@@ -173,7 +171,11 @@ extension FeedModel {
             let store = temporaryStore()
             try? store.save(FeedSample.taste)
             try? store.save(FeedBatch(createdAt: .now, cards: FeedSample.cards, opened: [FeedSample.cards[1].id]))
-            return FeedModel(store: store, model: nil)
+            let model = FeedModel(store: store, model: nil)
+            #if DEBUG
+            model.showDebugProblem()
+            #endif
+            return model
         case "feedEmpty":
             return FeedModel(store: temporaryStore(), model: nil)
         default:

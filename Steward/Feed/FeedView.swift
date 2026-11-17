@@ -6,6 +6,8 @@ struct FeedView: View {
     @State private var showsTaste = false
     @State private var showsSaved = false
     @State private var lastHidden: FeedCard?
+    @State private var showsKey = false
+    @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
 
@@ -28,6 +30,14 @@ struct FeedView: View {
                 }
                 .sheet(isPresented: $showsSaved) {
                     SavedView().environment(model)
+                }
+                // Fixing the key from here, then trying again as it closes.
+                .sheet(isPresented: $showsKey, onDismiss: { Task { await model.refresh() } }) {
+                    NavigationStack {
+                        OwnAIKeyView().toolbar {
+                            ToolbarItem(placement: .cancellationAction) { Button("Close") { showsKey = false } }
+                        }
+                    }
                 }
                 .overlay(alignment: .bottom) { undoToast }
         }
@@ -90,15 +100,19 @@ struct FeedView: View {
         case .loading:
             HStack(spacing: 10) {
                 ProgressView().controlSize(.small)
-                Text("Looking for today's finds…").font(.subheadline).foregroundStyle(Palette.muted)
+                // A web search can take a minute or two; say so, so the wait
+                // doesn't read as a hang.
+                Text("Looking for today's finds. This can take a minute or two.").font(.subheadline).foregroundStyle(Palette.muted)
             }
             .padding(.vertical, 6)
         case .noModel:
-            Banner(systemImage: "bolt.horizontal.circle",
-                   text: "Steward can't search for new things yet. What you tell it now is kept for when it can.",
-                   action: ("Edit Your Taste", { showsTaste = true }))
-        case .failed(let message):
-            Banner(systemImage: "exclamationmark.circle", text: message)
+            Banner(systemImage: "key",
+                   text: "Steward needs an AI key to look for new things. What you've told it is kept for when it can.",
+                   action: ("Add Your AI Key", { showsKey = true }))
+        case .failed(let problem):
+            Banner(systemImage: problem.isPassing ? "arrow.clockwise.circle" : "exclamationmark.circle",
+                   text: problem.message(in: .feed),
+                   action: fix(for: problem))
         case .idle:
             if let batch = model.batch {
                 Text(batch.createdAt, format: .dateTime.weekday(.wide).day().month(.wide))
@@ -106,6 +120,17 @@ struct FeedView: View {
                     .foregroundStyle(Palette.muted)
             }
         }
+    }
+
+    /// The next step for a failed refresh, as a button in the same banner.
+    private func fix(for problem: ModelProblem) -> (title: String, run: () -> Void) {
+        if problem.isFixedInKeySettings {
+            return ("Check Your AI Key", { showsKey = true })
+        }
+        if problem.kind == .noCredit, problem.provider == "OpenRouter" {
+            return ("Add Credit on OpenRouter", { openURL(URL(string: "https://openrouter.ai/settings/credits")!) })
+        }
+        return ("Try Again", { Task { await model.refresh() } })
     }
 
     @ViewBuilder

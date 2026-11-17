@@ -26,7 +26,14 @@ struct OwnAIKeyView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
             } footer: {
-                Text("Any provider that speaks the OpenAI format works. OpenRouter is filled in, and its model names look like \"provider/model\".")
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Any provider that speaks the OpenAI format works. OpenRouter is filled in, and its model names look like \"provider/model\".")
+                    if let url = RelaySettings.validURL(address), !ModelAccess.searchesWeb(url) {
+                        Text("Only OpenRouter lets Steward search the web. With this provider the Feed works from what the model already knows, so its finds may be dated.")
+                    } else {
+                        Text("Free models work for chat. Searching the web for the Feed costs under a cent a search, even with a free model, so keep a little credit on OpenRouter.")
+                    }
+                }
             }
             .listRowBackground(Palette.row)
 

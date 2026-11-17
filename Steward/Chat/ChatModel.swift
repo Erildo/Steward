@@ -407,7 +407,10 @@ final class ChatModel {
             guard !Task.isCancelled, let id = conversationID(for: caseID) else { return }
             if errand?.id == caseID { close() }
             tasks.setState(id, .handedBack(note: "Paused after a problem", date: .now))
-            say("I couldn't finish that step, so I've paused this errand. Nothing more goes out without your OK.", in: id)
+            // Say whose side the problem is on when it's the AI provider's.
+            let problem = ModelAccess.problem(error)
+            let reason = problem.kind == .other ? "" : " " + problem.message(in: .conversation)
+            say("I couldn't finish that step, so I've paused this errand. Nothing more goes out without your OK.\(reason)", in: id)
         }
     }
 
