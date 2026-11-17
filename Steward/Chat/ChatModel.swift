@@ -61,6 +61,11 @@ final class ChatModel {
         if id == errandConversationID, activity != .idle { return activity }
         if isWorking(in: id) { return .replying }
         if tasks.problems[id] != nil { return .problem }
+        if case .waiting(let until, let note) = tasks.stewardTask(id)?.state {
+            // An errand's note says who ("Waiting for Acme"); a model's may run long.
+            let short = note.hasPrefix("Waiting") && note.count <= 28
+            return .waiting(short ? note : "Waiting until \(until.formatted(.dateTime.month(.abbreviated).day()))")
+        }
         return .idle
     }
 

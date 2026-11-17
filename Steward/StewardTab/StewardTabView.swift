@@ -351,6 +351,21 @@ struct StewardTabView: View {
 
     private var appSection: some View {
         Section {
+            NavigationLink {
+                CatSettingsView()
+            } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Your Cat").foregroundStyle(Palette.ink)
+                        Text("Name, coat and how it reacts")
+                            .font(.footnote)
+                            .foregroundStyle(Palette.muted)
+                    }
+                } icon: {
+                    StewardAvatar(size: 29, blinks: false)
+                }
+            }
+            .listRowBackground(Palette.row)
             Picker(selection: $appearance) {
                 ForEach(Appearance.allCases) { Text($0.title).tag($0) }
             } label: {

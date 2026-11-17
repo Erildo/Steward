@@ -68,4 +68,6 @@ enum StewardActivity: Equatable {
     case replying
     /// The last reply failed; the thread says why.
     case problem
+    /// Steward is waiting on a company or a date; the words say which.
+    case waiting(String)
 }

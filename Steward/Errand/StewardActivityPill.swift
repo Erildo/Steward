@@ -6,6 +6,7 @@ struct StewardActivityPill: View {
     let action: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(CatLook.nameKey, store: CatLook.store) private var catName = ""
 
     private var needsYou: Bool { activity == .needsYou }
     /// Only an errand opens the panel; a chat reply has nothing more to show.
@@ -15,11 +16,18 @@ struct StewardActivityPill: View {
         default: false
         }
     }
+    private var name: String {
+        let trimmed = catName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Steward" : trimmed
+    }
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                leading
+                // Quiet hours are checked once a minute, so the cat falls asleep on time.
+                TimelineView(.everyMinute) { context in
+                    StewardAvatar(mood: mood(at: context.date))
+                }
                 Text(title)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(needsYou ? Palette.onOrange : Palette.ink)
@@ -49,67 +57,46 @@ struct StewardActivityPill: View {
         }
     }
 
+    /// What Steward is doing, said in words. The owner's name for the cat
+    /// leads short statuses; an errand step is long enough on its own.
     private var title: String {
         switch activity {
-        case .idle: "Steward"
+        case .idle: return name
+        case .working(let step, _, _): return step
+        default:
+            return name == "Steward" ? status : "\(name) · \(status)"
+        }
+    }
+
+    private var status: String {
+        switch activity {
+        case .idle: ""
         case .working(let step, _, _): step
         case .needsYou: "Needs your OK"
         case .done: "Done"
         case .replying: "Thinking"
         case .problem: "Couldn't reply"
+        case .waiting(let words): words
         }
     }
 
     private var accessibilityText: String {
         switch activity {
-        case .working(let step, let number, let total): "Steward: \(step), step \(number) of \(total)"
-        default: "Steward: \(title)"
+        case .idle: return name
+        case .working(let step, let number, let total): return "\(name): \(step), step \(number) of \(total)"
+        default: return "\(name): \(status)"
         }
     }
 
-    @ViewBuilder
-    private var leading: some View {
+    private func mood(at date: Date) -> CatMood {
         switch activity {
-        case .idle:
-            StewardAvatar()
-        case .working, .replying:
-            StewardAvatar().overlay { WorkingArc(animates: !reduceMotion) }
-        case .problem:
-            Image(systemName: "exclamationmark")
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(Palette.ink)
-                .frame(width: 30, height: 30)
-                .background(Palette.stewardBubble, in: .circle)
-                .accessibilityHidden(true)
-        case .needsYou:
-            Image(systemName: "hand.raised.fill")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Palette.orange)
-                .frame(width: 30, height: 30)
-                .background(Palette.onOrange, in: .circle)
-                .accessibilityHidden(true)
-        case .done:
-            Image(systemName: "checkmark")
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(Palette.onOrange)
-                .frame(width: 30, height: 30)
-                .background(Palette.orange, in: .circle)
-                .accessibilityHidden(true)
-        }
-    }
-}
-
-private struct WorkingArc: View {
-    let animates: Bool
-
-    var body: some View {
-        TimelineView(.animation(paused: !animates)) { context in
-            let turn = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.1) / 1.1
-            Circle()
-                .trim(from: 0, to: 0.28)
-                .stroke(Palette.ink, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                .rotationEffect(.degrees(turn * 360))
-                .padding(-2)
+        case .idle: ReviewNudges.quietHours()?.contains(date) == true ? .asleep : .idle
+        case .working: .working
+        case .replying: .thinking
+        case .needsYou: .needsYou
+        case .done: .done
+        case .problem: .problem
+        case .waiting: .waiting
         }
     }
 }
